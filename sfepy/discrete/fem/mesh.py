@@ -180,8 +180,7 @@ class Mesh(Struct):
 
     @staticmethod
     def from_file(filename=None, io='auto', prefix_dir=None,
-                  omit_facets=False, file_format=None,
-                  load_manifest='auto', manifest=None):
+                  omit_facets=False, file_format=None):
         """
         Read a mesh from a file.
 
@@ -199,19 +198,8 @@ class Mesh(Struct):
             If True, do not read cells of lower dimension than the space
             dimension (faces and/or edges). Only some MeshIO subclasses
             support this!
-        load_manifest : 'auto', 'always' or 'never'
-            Controls whether the companion ``*.manifest.json`` is loaded
-            and attached to the mesh via :func:`Mesh.attach_manifest`.
-            ``'auto'`` loads it only when the file exists next to
-            ``filename``.
-        manifest : dict, optional
-            An explicit manifest dictionary to attach.  Takes precedence
-            over loading from disk.
         """
         if isinstance(filename, Mesh):
-            if manifest is not None:
-                from sfepy.mesh.mesh_tools import attach_manifest
-                attach_manifest(filename, manifest=manifest)
             return filename
 
         if io == 'auto':
@@ -232,20 +220,6 @@ class Mesh(Struct):
         output('...done in %.2f s' % timer.stop())
 
         mesh._set_shape_info()
-
-        if manifest is None:
-            if load_manifest == 'auto':
-                from sfepy.mesh.mesh_tools import read_manifest, default_manifest_name
-                manifest = read_manifest(default_manifest_name(io.filename))
-            elif load_manifest == 'always':
-                from sfepy.mesh.mesh_tools import read_manifest, default_manifest_name
-                manifest = read_manifest(default_manifest_name(io.filename))
-            else:
-                manifest = None
-
-        if manifest is not None:
-            from sfepy.mesh.mesh_tools import attach_manifest
-            attach_manifest(mesh, manifest=manifest)
 
         return mesh
 
@@ -458,8 +432,7 @@ class Mesh(Struct):
         return self._coors
 
     def write(self, filename=None, io=None, out=None, float_format=None,
-              file_format=None, write_manifest=False,
-              cell_group_names=None, vertex_group_names=None, **kwargs):
+              file_format=None, **kwargs):
         """
         Write mesh + optional results in `out` to a file.
 
@@ -474,15 +447,6 @@ class Mesh(Struct):
         float_format : str, optional
             The format string used to print floats in case of a text file
             format.
-        write_manifest : bool, optional
-            If True, write a companion ``*.manifest.json`` containing a
-            region/material mapping for this mesh.
-        cell_group_names : dict, optional
-            Mapping ``cell_group_id -> region_name`` used when building the
-            manifest.
-        vertex_group_names : dict, optional
-            Mapping ``vertex_group_id -> name`` used when building the
-            manifest.
         **kwargs : dict, optional
             Additional arguments that can be passed to the `MeshIO` instance.
         """
@@ -501,36 +465,8 @@ class Mesh(Struct):
         io.set_float_format(float_format)
         io.write(filename, self, out, **kwargs)
 
-        if write_manifest:
-            from sfepy.mesh.mesh_tools import write_mesh_manifest
-            write_mesh_manifest(self, filename,
-                                cell_group_names=cell_group_names,
-                                vertex_group_names=vertex_group_names)
-
     def get_bounding_box(self):
         return nm.vstack((nm.amin(self.coors, 0), nm.amax(self.coors, 0)))
-
-    def attach_manifest(self, filename=None, manifest=None):
-        """Attach a region/material manifest to this mesh.
-
-        See :func:`sfepy.mesh.mesh_tools.attach_manifest`.
-        """
-        from sfepy.mesh.mesh_tools import attach_manifest as _attach
-        return _attach(self, filename=filename, manifest=manifest)
-
-    def write_manifest(self, filename=None, cell_group_names=None,
-                       vertex_group_names=None, include_defaults=True):
-        """Write the companion ``*.manifest.json`` next to ``filename``.
-
-        See :func:`sfepy.mesh.mesh_tools.write_mesh_manifest`.
-        """
-        from sfepy.mesh.mesh_tools import write_mesh_manifest
-        if filename is None:
-            filename = self.name + '.mesh'
-        return write_mesh_manifest(self, filename,
-                                   cell_group_names=cell_group_names,
-                                   vertex_group_names=vertex_group_names,
-                                   include_defaults=include_defaults)
 
     def get_conn(self, desc, ret_cells=False, tdim=None):
         """

@@ -9,6 +9,7 @@ warnings.simplefilter('ignore', sps.SparseEfficiencyWarning)
 
 from sfepy.base.base import output, get_default, assert_, try_imports
 from sfepy.base.timing import Timer
+from sfepy.solvers.history import get_history
 from sfepy.solvers.solvers import LinearSolver
 
 def solve(mtx, rhs, solver_class=None, solver_conf=None):
@@ -89,6 +90,23 @@ def standard_call(call):
         if status is not None:
             status['time'] = elapsed
             status['n_iter'] = n_iter
+            status['eps_a'] = eps_a
+            status['eps_r'] = eps_r
+
+            history = get_history(status)
+            if history is not None:
+                try:
+                    rnorm = float(nm.linalg.norm(mtx @ result - rhs))
+                except Exception:
+                    rnorm = None
+                history.record_ls(
+                    run=len(history.ls),
+                    n_iter=int(n_iter),
+                    time=float(elapsed),
+                    eps_a=eps_a,
+                    eps_r=eps_r,
+                    residual=rnorm,
+                )
 
         return result
 

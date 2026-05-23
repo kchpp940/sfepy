@@ -445,31 +445,6 @@ class ProblemConf(Struct):
         self.transform_input()
         self.funmod = funmod
 
-    def apply_manifest(self, mesh, verbose=True):
-        """Apply a sidecar manifest from ``mesh`` to this configuration.
-
-        Reads ``mesh.region_material_manifest`` and adds region / material
-        entries to ``self.regions`` / ``self.materials`` for any names not
-        already defined.  This is normally called automatically by
-        :meth:`Problem.from_conf`, but is also available for manual use.
-
-        Parameters
-        ----------
-        mesh : Mesh
-            The mesh whose manifest should be applied.
-        verbose : bool
-            If True, log warnings for skipped (conflicting) names and
-            info about a missing manifest.
-
-        Returns
-        -------
-        report : dict
-            See :func:`sfepy.mesh.mesh_tools.apply_manifest_to_conf` for
-            the full report structure.
-        """
-        from sfepy.mesh.mesh_tools import apply_manifest_to_conf
-        return apply_manifest_to_conf(self, mesh, verbose=verbose)
-
     def _validate_helper(self, items, but_nots):
         keys = list(self.__dict__.keys())
         left_over = keys[:]

@@ -260,24 +260,6 @@ class MeshIO(Struct):
     def get_vector_format(self, dim):
         return ' '.join([self.float_format] * dim)
 
-    def attach_manifest(self, mesh, manifest=None):
-        """Attach a region/material manifest to the mesh.
-
-        If ``manifest`` is ``None`` the companion ``*.manifest.json`` next
-        to ``self.filename`` is loaded (when present).  Subclasses can call
-        this at the end of their ``read()`` implementation so that the
-        mesh returned from ``io.read(mesh)`` carries the manifest even
-        when not going through :meth:`Mesh.from_file`.
-        """
-        from sfepy.mesh.mesh_tools import (attach_manifest,
-                                           default_manifest_name,
-                                           read_manifest)
-        if manifest is None and isinstance(self.filename, str):
-            manifest = read_manifest(default_manifest_name(self.filename))
-        if manifest is not None:
-            attach_manifest(mesh, manifest=manifest)
-        return mesh
-
 
 class UserMeshIO(MeshIO):
     """
@@ -482,7 +464,7 @@ class MeshioLibIO(MeshIO):
         for ii, k in enumerate(cell_types):
             output('  %s: %d' % (k, cells[ii].shape[0]))
 
-        return self.attach_manifest(mesh)
+        return mesh
 
     def write(self, filename, mesh, out=None, ts=None, **kwargs):
         (coors, cells,

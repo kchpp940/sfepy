@@ -105,16 +105,6 @@ helps = {
       Example: --revolve='p[-1,-2,0] v[1,0,0] n12 m180'""",
     'mirror': """mirror the given mesh using a plane defined by a point and
       a normal vector. Example: --mirror='p[-0.5,-0.2,0] v[0,1,0]'""",
-    'manifest': """write a companion ``<filename_out>.manifest.json``
-      with a region/material mapping inferred from the final mesh cell
-      groups and vertex groups. Use with ``--region-names`` and
-      ``--vertex-names`` to override the default names.""",
-    'region_names': """python dict mapping cell group id -> region name,
-      e.g. '{"0": "Omega", "1": "Hole"}'.  The region names are used to
-      populate the ``regions`` and ``materials`` sections of the
-      manifest.""",
-    'vertex_names': """python dict mapping vertex group id -> name,
-      e.g. '{"1": "Left", "2": "Right"}'.""",
 }
 
 def _parse_val_or_vec(option, name, parser):
@@ -222,14 +212,6 @@ def main():
     parser.add_argument('--mirror', metavar='options',
                         action='store', dest='mirror',
                         default=None, help=helps['mirror'])
-    parser.add_argument('--manifest', action='store_true',
-                        dest='manifest', help=helps['manifest'])
-    parser.add_argument('--region-names', metavar='dict',
-                        action='store', dest='region_names',
-                        default=None, help=helps['region_names'])
-    parser.add_argument('--vertex-names', metavar='dict',
-                        action='store', dest='vertex_names',
-                        default=None, help=helps['vertex_names'])
     parser.add_argument('filename_in')
     parser.add_argument('filename_out')
     options = parser.parse_args()
@@ -479,23 +461,6 @@ def main():
         output('writing %s...' % filename_out)
         mesh.write(filename_out, file_format=options.format, binary=False)
         output('...done')
-
-    if options.manifest:
-        region_names = None
-        vertex_names = None
-        if options.region_names is not None:
-            region_names = literal_eval(options.region_names)
-            region_names = {int(k): str(v) for k, v in region_names.items()}
-        if options.vertex_names is not None:
-            vertex_names = literal_eval(options.vertex_names)
-            vertex_names = {int(k): str(v) for k, v in vertex_names.items()}
-
-        source_command = 'convert_mesh ' + ' '.join(sys.argv[1:])
-        mt.write_mesh_manifest(mesh, filename_out,
-                               cell_group_names=region_names,
-                               vertex_group_names=vertex_names,
-                               source_mesh=filename_in,
-                               source_command=source_command)
 
 if __name__ == '__main__':
     main()
