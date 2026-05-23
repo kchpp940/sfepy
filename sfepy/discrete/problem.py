@@ -1046,15 +1046,32 @@ class Problem(Struct):
         variables = self.get_variables()
 
         ebc_indx = []
-        epbc_indx = []
+        epbc_master_indx = []
+        epbc_slave_indx = []
         for ii, variable in enumerate(variables.iter_state(ordered=True)):
-            eq_map = variable.eq_map
+            cp = variable.eq_map.constraint_plan
             offset = variables.di.indx[variable.name].start
-            ebc_indx.append(eq_map.eq_ebc + offset)
-            epbc_indx.append((eq_map.master + offset, eq_map.slave + offset))
 
-        ebc_indx = nm.concatenate(ebc_indx)
-        epbc_indx = nm.concatenate(epbc_indx, axis=1)
+            if cp.has_ebc():
+                ebc_indx.append(cp.get_ebc_row_indices(offset))
+
+            if cp.has_epbc():
+                ebc_master, ebc_slave = cp.get_epbc_row_indices(offset)
+                epbc_master_indx.append(ebc_master)
+                epbc_slave_indx.append(ebc_slave)
+
+        if len(ebc_indx) > 0:
+            ebc_indx = nm.concatenate(ebc_indx)
+        else:
+            ebc_indx = nm.array([], dtype=nm.int32)
+
+        if len(epbc_master_indx) > 0:
+            epbc_master_indx = nm.concatenate(epbc_master_indx)
+            epbc_slave_indx = nm.concatenate(epbc_slave_indx)
+            epbc_indx = nm.vstack((epbc_master_indx, epbc_slave_indx))
+        else:
+            epbc_indx = nm.array([[], []], dtype=nm.int32)
+
         return ebc_indx, epbc_indx
 
     def set_conf_solvers(self, conf_solvers=None, options=None):

@@ -1191,12 +1191,10 @@ class FEField(Field):
         name = f'sd_{region.name}'
         if name not in self.extra_data:
             if trace_region is not None and region.tdim == (region.dim - 1):
-                sd = FEPhantomSurface(name, region, self.econn,
-                                      approx_order=self.approx_order)
+                sd = FEPhantomSurface(name, region, self.econn)
             else:
                 sd = FESurface(name, region, self.efaces, self.econn,
-                               self.region,
-                               approx_order=self.approx_order)
+                               self.region)
             self.extra_data[name] = sd
 
         if name in self.extra_data and trace_region is not None:
@@ -1451,29 +1449,3 @@ class H1Mixin(Struct):
         """
         self.n_components = int(nm.prod(self.shape))
         self.val_shape = self.shape
-
-    def get_facet_dof_signs(self, dim, ori):
-        """
-        Return the per-DOF sign row for a facet of dimension ``dim`` at
-        orientation ``ori``.
-
-        The default implementation returns ``None`` (no sign flips), which
-        is correct for nodal (Lagrange) H1 fields.  Hierarchical
-        (Lobatto) fields override this method to return the sign table
-        produced by :func:`sfepy.discrete.fem.facets.get_facet_dof_signs`.
-
-        Parameters
-        ----------
-        dim : int
-            Facet dimension (1 for edges, 2 for faces).
-        ori : array_like
-            Orientation integers (one per facet) as returned by
-            :func:`get_facet_orientations`.
-
-        Returns
-        -------
-        signs : ndarray or None
-            ``(n_facet, n_dof_per_facet)`` sign table, or ``None`` if the
-            field has no orientation-dependent signs.
-        """
-        return None

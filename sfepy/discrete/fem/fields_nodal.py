@@ -18,11 +18,7 @@ from sfepy.discrete.integrals import Integral
 from sfepy.discrete.fem.utils import prepare_remap
 from sfepy.discrete.common.dof_info import expand_nodes_to_dofs
 from sfepy.discrete.common.mappings import get_physical_qps
-from sfepy.discrete.fem.facets import (get_facet_dof_permutations,
-                                       get_facet_cmps_powers,
-                                       get_facet_orientation_key,
-                                       get_facet_orientations,
-                                       get_surface_facet_permutations)
+from sfepy.discrete.fem.facets import get_facet_dof_permutations
 from sfepy.discrete.fem.fields_base import FEField, H1Mixin
 
 class GlobalNodalLikeBasis(Struct):
@@ -31,9 +27,15 @@ class GlobalNodalLikeBasis(Struct):
         order = self.approx_order
         self.node_desc = self.poly_space.describe_nodes()
 
-        (self.edge_dof_perms,
-         self.face_dof_perms) = get_surface_facet_permutations(
-             order, self.gel, self.node_desc)
+        edge_nodes = self.node_desc.edge_nodes
+        if edge_nodes is not None:
+            n_fp = self.gel.edges.shape[1]
+            self.edge_dof_perms = get_facet_dof_permutations(n_fp, order)
+
+        face_nodes = self.node_desc.face_nodes
+        if face_nodes is not None:
+            n_fp = self.gel.faces.shape[1]
+            self.face_dof_perms = get_facet_dof_permutations(n_fp, order)
 
     def _setup_edge_dofs(self):
         """
@@ -80,7 +82,7 @@ class GlobalNodalLikeBasis(Struct):
 
         n_f = self.gel.edges.shape[0] if dim == 1 else self.gel.faces.shape[0]
 
-        oris = get_facet_orientations(cmesh, dim)
+        oris = cmesh.get_orientations(dim)
 
         gcells = self.region.get_cells()
         n_el = gcells.shape[0]
@@ -166,23 +168,31 @@ class H1NodalMixin(H1Mixin, GlobalNodalLikeBasis):
 
         Modifies `self.econn` in-place.
         """
-        edge_perm = (self.edge_dof_perms[1]
-                     if self.edge_dof_perms is not None else None)
-
         if self.gel.name == '2_4':
             ef = self.efaces
 
             for ii, sub in enumerate(subs):
-                ee = ef[sub[1]]
-                master = self.econn[sub[0], ee[edge_perm]]
+                # 2_4 edges always in opposite orientation.
+                ee = ef[sub[1]].copy()
+                ee[0], ee[1] = ee[1], ee[0] # Swap vertex DOFs.
+                ee[2:] = ee[-1:1:-1] # Swap edge DOFs.
+
+                master = self.econn[sub[0], ee]
                 self.econn[sub[2], ef[sub[3]]] = master
                 self.econn[sub[4], ef[sub[5]]] = master
 
         elif self.gel.name == '3_8':
-            quad_cmps, quad_powers = get_facet_cmps_powers(4)
-
             def _sort4(p):
-                return get_facet_orientation_key(p, quad_cmps, quad_powers)
+                key = 0
+
+                if (p[0] < p[1]): key += 1
+                if (p[0] < p[2]): key += 2
+                if (p[1] < p[2]): key += 4
+                if (p[0] < p[3]): key += 8
+                if (p[1] < p[3]): key += 16
+                if (p[2] < p[3]): key += 32
+
+                return key
 
             if subs[0] is not None:
                 ef = self.efaces
@@ -247,8 +257,10 @@ class H1NodalMixin(H1Mixin, GlobalNodalLikeBasis):
                             cell[ef[sub[ib]]] = master[ef[sub[1]]]
 
                         else:
-                            cell[ef[sub[ib]]] = master[
-                                ef[sub[1]][edge_perm]]
+                            ee = ef[sub[1]].copy()
+                            ee[0], ee[1] = ee[1], ee[0] # Swap vertex DOFs.
+                            ee[2:] = ee[-1:1:-1] # Swap edge DOFs.
+                            cell[ef[sub[ib]]] = master[ee]
 
         else:
             raise ValueError('unsupported reference element type! (%s)'

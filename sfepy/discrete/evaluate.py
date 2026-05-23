@@ -5,6 +5,7 @@ import numpy as nm
 from sfepy.base.base import output, get_default, OneTypeList, Struct
 from sfepy.discrete import Equations, Variables, Region, Integral, Integrals
 from sfepy.discrete.common.fields import setup_extra_data
+from sfepy.discrete.conditions import ConstraintPlan
 
 def apply_ebc_to_matrix(mtx, ebc_rows, epbc_rows=None):
     """
@@ -37,6 +38,34 @@ def apply_ebc_to_matrix(mtx, ebc_rows, epbc_rows=None):
             # see create_adof_conns().
             mtx[master, master] = 1.0
             mtx[master, slave] = -1.0
+
+def apply_constraint_plan_to_matrix(mtx, constraint_plans, offsets=None):
+    """
+    Apply constraint plans to matrix rows.
+
+    This function applies EBC and EPBC constraints from unified constraint
+    plans to a matrix, ensuring consistent handling of all constraint types.
+
+    Parameters
+    ----------
+    mtx : sparse matrix
+        The matrix to apply constraints to.
+    constraint_plans : list of ConstraintPlan
+        The constraint plans for each variable.
+    offsets : list of int, optional
+        The offsets for each variable in the global vector.
+    """
+    if offsets is None:
+        offsets = [0] * len(constraint_plans)
+
+    for cp, offset in zip(constraint_plans, offsets):
+        if cp.has_ebc():
+            ebc_rows = offset + cp.ebc_dofs
+            apply_ebc_to_matrix(mtx, ebc_rows)
+
+        if cp.has_epbc():
+            epbc_rows = (offset + cp.epbc_master, offset + cp.epbc_slave)
+            apply_ebc_to_matrix(mtx, [], epbc_rows)
 
 ##
 # 02.10.2007, c
@@ -88,7 +117,7 @@ class Evaluator(Struct):
         if self.matrix_hook is not None:
             vec_r = self.matrix_hook(vec_r, self.problem, call_mode='residual')
 
-        if self.problem.equations.variables.has_lcbc:
+        if self.problem.equations.has_lcbc():
             mtx_lcbc = self.problem.equations.get_lcbc_operator()
 
             vec_rr = mtx_lcbc.T @ vec_r
@@ -98,6 +127,23 @@ class Evaluator(Struct):
             vec_r = vec_rr
 
         return vec_r
+
+    def _has_lcbc(self):
+        """Check if any variable has LCBC constraints using constraint plans."""
+        variables = self.problem.equations.variables
+        for var in variables.iter_state():
+            cp = var.eq_map.constraint_plan
+            if cp.has_lcbc():
+                return True
+        return False
+
+    def _get_constraint_plans(self):
+        """Get all constraint plans for state variables."""
+        variables = self.problem.equations.variables
+        plans = {}
+        for var in variables.iter_state():
+            plans[var.name] = var.eq_map.constraint_plan
+        return plans
 
     def eval_tangent_matrix(self, vec, mtx=None, is_full=False,
                             select_term=None):
@@ -125,7 +171,7 @@ class Evaluator(Struct):
         if self.matrix_hook is not None:
             mtx = self.matrix_hook(mtx, pb, call_mode='basic')
 
-        if self.problem.equations.variables.has_lcbc:
+        if self.problem.equations.has_lcbc():
             mtx_lcbc = self.problem.equations.get_lcbc_operator()
 
             mtx_r = mtx_lcbc.T @ mtx @ mtx_lcbc
@@ -260,6 +306,14 @@ def create_evaluable(expression, fields, materials, variables, integrals,
     return equations, variables
 
 
+def _has_lcbc(variables):
+    """Check if any variable has LCBC constraints using constraint plans."""
+    for var in variables.iter_state():
+        cp = var.eq_map.constraint_plan
+        if cp.has_lcbc():
+            return True
+    return False
+
 def eval_equations(equations, variables, names=None, preserve_caches=False,
                    mode='eval', dw_mode='vector', term_mode=None,
                    active_only=True, any_dof_conn=False, verbose=True):
@@ -321,8 +375,8 @@ def eval_equations(equations, variables, names=None, preserve_caches=False,
     out = equations.evaluate(names=names, mode=mode, dw_mode=dw_mode,
                              term_mode=term_mode, asm_obj=asm_obj)
 
-    if variables.has_lcbc and mode == 'weak':
-        mtx_lcbc = variables.mtx_lcbc
+    if equations.has_lcbc() and mode == 'weak':
+        mtx_lcbc = equations.get_lcbc_operator()
         if dw_mode == 'vector':
             out = mtx_lcbc.T @ out
 

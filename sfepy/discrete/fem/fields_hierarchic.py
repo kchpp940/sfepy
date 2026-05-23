@@ -1,12 +1,9 @@
 import numpy as nm
 
 from sfepy.base.base import assert_
-from sfepy.discrete.fem.utils import prepare_remap
+from sfepy.discrete.fem.utils import prepare_remap, prepare_translate
 from sfepy.discrete.common.dof_info import expand_nodes_to_dofs
 from sfepy.discrete.fem.fields_base import FEField, H1Mixin
-from sfepy.discrete.fem.facets import (get_facet_orientations,
-                                       get_surface_facet_permutations,
-                                       get_surface_facet_signs)
 
 class H1HierarchicVolumeField(H1Mixin, FEField):
     """
@@ -25,14 +22,6 @@ class H1HierarchicVolumeField(H1Mixin, FEField):
     def _setup_facet_orientations(self):
         self.node_desc = self.poly_space.describe_nodes()
 
-        order = self.approx_order
-        (self.edge_dof_perms,
-         self.face_dof_perms) = get_surface_facet_permutations(
-             order, self.gel, self.node_desc)
-        (self.edge_dof_signs,
-         self.face_dof_signs) = get_surface_facet_signs(
-             order, self.gel, self.node_desc)
-
     def _setup_edge_dofs(self):
         """
         Setup edge DOF connectivity.
@@ -42,8 +31,6 @@ class H1HierarchicVolumeField(H1Mixin, FEField):
 
         return self._setup_facet_dofs(1,
                                       self.node_desc.edge,
-                                      self.edge_dof_perms,
-                                      self.edge_dof_signs,
                                       self.n_vertex_dof)
 
     def _setup_face_dofs(self):
@@ -55,12 +42,9 @@ class H1HierarchicVolumeField(H1Mixin, FEField):
 
         return self._setup_facet_dofs(self.domain.shape.tdim - 1,
                                       self.node_desc.face,
-                                      self.face_dof_perms,
-                                      self.face_dof_signs,
                                       self.n_vertex_dof + self.n_edge_dof)
 
-    def _setup_facet_dofs(self, dim, facet_desc, facet_perms, facet_signs,
-                          offset):
+    def _setup_facet_dofs(self, dim, facet_desc, offset):
         """
         Helper function to setup facet DOF connectivity, works for both
         edges and faces.
@@ -83,7 +67,7 @@ class H1HierarchicVolumeField(H1Mixin, FEField):
         n_f = self.gel.edges.shape[0] if dim == 1 else self.gel.faces.shape[0]
         n_fp = 2 if dim == 1 else self.gel.surface_facet.n_vertex
 
-        oris = get_facet_orientations(cmesh, dim)
+        oris = cmesh.get_orientations(dim)
 
         gcells = self.region.get_cells()
         n_el = gcells.shape[0]
@@ -105,6 +89,8 @@ class H1HierarchicVolumeField(H1Mixin, FEField):
         # each element.
         iep = facet_desc[ies]
 
+        self.econn[iel[:, None], iep] = gdofs
+
         ori = oris[aux].ravel()
 
         if (n_fp == 2) and (self.gel.name in ['2_4', '3_8']):
@@ -113,21 +99,63 @@ class H1HierarchicVolumeField(H1Mixin, FEField):
             # True = positive, False = negative edge orientation w.r.t.
             # reference tensor product axes.
             tp_edge_ori = (nm.diff(ecs, axis=1).sum(axis=2) > 0).squeeze()
-            aux_ori = nm.tile(tp_edge_ori, n_el)
-            ori = nm.where(aux_ori, ori, 1 - ori)
+            aux = nm.tile(tp_edge_ori, n_el)
+            ori = nm.where(aux, ori, 1 - ori)
 
-        if facet_perms is not None:
-            perm = facet_perms[ori]
-            iaux = nm.arange(gdofs.shape[0], dtype=nm.int32)
-            gdofs = gdofs[iaux[:, None], perm]
+        if n_fp == 2: # Edges.
+            # ori == 1 means the basis has to be multiplied by -1.
+            ps = self.poly_space
+            orders = ps.node_orders
+            eori = nm.repeat(ori[:, None], n_dof_per_facet, 1)
+            eoo = orders[iep] % 2 # Odd orders.
+            self.ori[iel[:, None], iep] = eori * eoo
 
-        self.econn[iel[:, None], iep] = gdofs
+        elif n_fp == 3: # Triangular faces.
+            raise NotImplementedError
 
-        if facet_signs is not None:
-            sign_row = facet_signs[ori]
-            if facet_perms is not None:
-                sign_row = sign_row[iaux[:, None], perm]
-            self.ori[iel[:, None], iep] = sign_row
+        else: # Quadrilateral faces.
+            # ori encoding in 3 bits:
+            # 0: axis swap, 1: axis 1 sign, 2: axis 2 sign
+            # 0 = + or False, 1 = - or True
+            # 63 -> 000 = 0
+            #  0 -> 001 = 1
+            # 30 -> 010 = 2
+            # 33 -> 011 = 3
+            # 11 -> 100 = 4
+            #  7 -> 101 = 5
+            # 52 -> 110 = 6
+            # 56 -> 111 = 7
+            # Special cases:
+            # Both orders same and even -> 000
+            # Both orders same and odd -> 0??
+            # Bits 1, 2 are multiplied by (swapped) axial order % 2.
+            new = nm.repeat(nm.arange(8, dtype=nm.int32), 3)
+            translate = prepare_translate([31, 59, 63,
+                                           0, 1, 4,
+                                           22, 30, 62,
+                                           32, 33, 41,
+                                           11, 15, 43,
+                                           3, 6, 7,
+                                           20, 52, 60,
+                                           48, 56, 57], new)
+            ori = translate[ori]
+            eori = nm.repeat(ori[:, None], n_dof_per_facet, 1)
+
+            ps = self.poly_space
+            orders = ps.face_axes_nodes[iep - ps.face_indx[0]]
+            eoo = orders % 2
+            eoo0, eoo1 = eoo[..., 0], eoo[..., 1]
+
+            i0 = nm.where(eori < 4)
+            i1 = nm.where(eori >= 4)
+
+            eori[i0] = nm.bitwise_and(eori[i0], 2*eoo0[i0] + 5)
+            eori[i0] = nm.bitwise_and(eori[i0], eoo1[i0] + 6)
+
+            eori[i1] = nm.bitwise_and(eori[i1], eoo0[i1] + 6)
+            eori[i1] = nm.bitwise_and(eori[i1], 2*eoo1[i1] + 5)
+
+            self.ori[iel[:, None], iep] = eori
 
         n_dof = n_dof_per_facet * facets.shape[0]
         assert_(n_dof == nm.prod(all_dofs.shape))
@@ -217,37 +245,3 @@ class H1HierarchicVolumeField(H1Mixin, FEField):
         ctx.geo_ctx = geo_ctx
 
         return ctx
-
-    def get_facet_dof_signs(self, dim, ori):
-        """
-        Return the per-DOF sign row for a facet of dimension ``dim`` at
-        orientation ``ori``.
-
-        The returned array has length equal to the number of DOFs on a facet
-        (including corner DOFs).  For edges it contains ``0`` or ``1``
-        indicating whether the basis should be multiplied by ``-1``; for quad
-        faces it contains the 3-bit orientation code expected by
-        :class:`LobattoTensorProductPolySpace`.
-
-        Parameters
-        ----------
-        dim : int
-            Facet dimension (1 for edges, 2 for faces).
-        ori : array_like
-            Orientation integers (one per facet) as returned by
-            :func:`get_facet_orientations`.
-
-        Returns
-        -------
-        signs : ndarray
-            ``(n_facet, n_dof_per_facet)`` sign table.
-        """
-        if dim == 1:
-            tbl = self.edge_dof_signs
-        else:
-            tbl = self.face_dof_signs
-
-        if tbl is None:
-            return None
-
-        return tbl[nm.asarray(ori, dtype=nm.int32)]

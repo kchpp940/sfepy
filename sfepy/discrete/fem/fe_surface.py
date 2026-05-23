@@ -1,17 +1,13 @@
 import numpy as nm
 
 from sfepy.base.base import get_default, Struct
-from sfepy.discrete.fem.facets import (build_orientation_map,
-                                       get_facet_dof_permutations,
-                                       get_facet_orientation_array,
-                                       get_facet_orientations)
+from sfepy.discrete.fem.facets import build_orientation_map
 from sfepy.discrete.fem.utils import prepare_remap
 
 class FESurface(Struct):
     """Description of a surface of a finite element domain."""
 
-    def __init__(self, name, region, efaces, volume_econn, volume_region=None,
-                 approx_order=1):
+    def __init__(self, name, region, efaces, volume_econn, volume_region=None):
         """nodes[leconn] == econn"""
         """nodes are sorted by node number -> same order as region.vertices"""
         self.name = get_default(name, 'surface_data_%s' % region.name)
@@ -62,7 +58,6 @@ class FESurface(Struct):
         self.leconn = leconn
         self.face_type = face_type
         self.bkey = bkey
-        self.approx_order = approx_order
         self.meconn = {}
         self.mleconn = {}
         self.set_orientation_map()
@@ -87,15 +82,12 @@ class FESurface(Struct):
         n_fp = self.n_fp
         if n_fp <= 4:
             oo, _, _ = build_orientation_map(n_fp)
-            self.ori_map = get_facet_orientation_array(oo, n_fp)
-            if self.approx_order is not None and self.approx_order > 0:
-                self.dof_perms = get_facet_dof_permutations(
-                    n_fp, self.approx_order)
-            else:
-                self.dof_perms = None
+            ori_map = nm.zeros((nm.max(list(oo.keys())) + 1, n_fp),
+                               dtype=nm.int32)
+            ori_map[list(oo.keys())] = nm.array([ii[1] for ii in oo.values()])
+            self.ori_map = ori_map
         else:
             self.ori_map = None
-            self.dof_perms = None
 
     def setup_mirror_connectivity(self, region, mirror_name):
         """
@@ -108,29 +100,23 @@ class FESurface(Struct):
 
         2. orientation -> permutation.
         """
-        def get_omap(reg):
+        def get_omap(reg, ori_map):
             if reg.tdim == (reg.dim - 1):
                 cells = reg.get_cells()
                 conn = reg.domain.get_conn(tdim=reg.tdim)[cells, :]
                 return nm.argsort(conn)
             else:
                 conn = reg.cmesh.get_conn_as_graph(reg.dim, reg.dim - 1)
-                oris = get_facet_orientations(reg.cmesh, reg.dim - 1)
+                oris = reg.cmesh.facet_oris
                 fis = reg.get_facet_indices()
-                if self.dof_perms is not None:
-                    perms = self.dof_perms[
-                        oris[conn.indptr[fis[:, 0]] + fis[:, 1]]]
-                    return perms[:, :self.n_fp]
-                else:
-                    return self.ori_map[
-                        oris[conn.indptr[fis[:, 0]] + fis[:, 1]]]
+                return ori_map[oris[conn.indptr[fis[:, 0]] + fis[:, 1]]]
 
         if mirror_name in self.meconn:
             return
 
         mregion = region.get_mirror_region(mirror_name)
-        mmap = get_omap(mregion)
-        omap = get_omap(region)
+        mmap = get_omap(mregion, self.ori_map)
+        omap = get_omap(region, self.ori_map)
 
         econn = self.econn
         if mirror_name in region.mirror_maps\
@@ -179,7 +165,7 @@ class FESurface(Struct):
 class FEPhantomSurface(FESurface):
     """A phantom surface of the region with tdim=2."""
 
-    def __init__(self, name, region, volume_econn, approx_order=1):
+    def __init__(self, name, region, volume_econn):
         self.name = get_default(name, 'surface_data_%s' % region.name)
 
         ii = region.get_cells()
@@ -208,7 +194,6 @@ class FEPhantomSurface(FESurface):
         self.leconn = leconn
         self.face_type = face_type
         self.bkey = bkey
-        self.approx_order = approx_order
         self.meconn = {}
         self.mleconn = {}
         self.set_orientation_map()
