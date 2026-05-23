@@ -10,7 +10,7 @@ import scipy.sparse as sp
 from sfepy.base.base import assert_, Struct
 from sfepy.discrete.functions import Function
 from sfepy.discrete.conditions import get_condition_value, EssentialBC, \
-    PeriodicBC, DGPeriodicBC, DGEssentialBC, ConstraintPlan
+    PeriodicBC, DGPeriodicBC, DGEssentialBC
 
 
 def expand_nodes_to_dofs(nods, n_dof_per_node):
@@ -248,9 +248,6 @@ def is_active_bc(bc, ts=None, functions=None):
 class EquationMap(Struct):
     """
     Map all DOFs to equations for active DOFs.
-
-    This class uses ConstraintPlan as the single source of truth for
-    all constraint information (EBC, EPBC, LCBC).
     """
 
     def __init__(self, name, dof_names, var_di):
@@ -268,55 +265,25 @@ class EquationMap(Struct):
         self.dg_epbc_names = []
         self.dg_epbc = []
 
-        self.constraint_plan = ConstraintPlan(name, var_di.var_name, var_di.n_dof)
-
-    @property
-    def eqi(self):
-        return self.constraint_plan.eqi
-
-    @property
-    def n_eq(self):
-        return self.constraint_plan.n_eq
-
-    @property
-    def eq_ebc(self):
-        return self.constraint_plan.ebc_dofs
-
-    @property
-    def val_ebc(self):
-        return self.constraint_plan.ebc_values
-
-    @property
-    def master(self):
-        return self.constraint_plan.epbc_master
-
-    @property
-    def slave(self):
-        return self.constraint_plan.epbc_slave
-
-    @property
-    def n_ebc(self):
-        return len(self.constraint_plan.ebc_dofs)
-
-    @property
-    def n_epbc(self):
-        return len(self.constraint_plan.epbc_master)
-
     def _init_empty(self, field):
-        cp = self.constraint_plan
+        self.val_ebc = nm.empty((0,), dtype=field.dtype)
 
-        if field.get('unused_dofs') is not None:
-            self._mark_unused(field)
-            eqi = nm.compress(self.eq >= 0, self.eq)
-            self.eq[eqi] = nm.arange(eqi.shape[0], dtype=nm.int32)
+        if field.get('unused_dofs') is None:
+            self.eqi = nm.arange(self.var_di.n_dof, dtype=nm.int32)
+
         else:
-            eqi = nm.arange(self.var_di.n_dof, dtype=nm.int32)
+            self._mark_unused(field)
+            self.eqi = nm.compress(self.eq >= 0, self.eq)
+            self.eq[self.eqi] = nm.arange(self.eqi.shape[0], dtype=nm.int32)
 
-        cp.set_ebc(nm.empty((0,), dtype=nm.int32),
-                   nm.empty((0,), dtype=field.dtype))
-        cp.set_epbc(nm.empty((0,), dtype=nm.int32),
-                     nm.empty((0,), dtype=nm.int32))
-        cp.set_equation_mapping(eqi, self.eq, eqi.shape[0])
+        self.eq_ebc = nm.empty((0,), dtype=nm.int32)
+
+        self.master = nm.empty((0,), dtype=nm.int32)
+        self.slave = nm.empty((0,), dtype=nm.int32)
+
+        self.n_eq = self.eqi.shape[0]
+        self.n_ebc = self.eq_ebc.shape[0]
+        self.n_epbc = self.master.shape[0]
 
     def _mark_unused(self, field):
         unused_dofs = field.get('unused_dofs')
@@ -520,39 +487,36 @@ class EquationMap(Struct):
         chains = group_chains(chains)
         resolve_chains(master_slave, chains)
 
-        master = nm.nonzero(master_slave > 0)[0]
-        slave = master_slave[master] - 1
+        self.master = nm.nonzero(master_slave > 0)[0]
+        self.slave = master_slave[self.master] - 1
 
         # Propagate EBCs via PBCs.
-        mask = eq_ebc[master] > 0
-        im0 = master[mask]
-        im1 = slave[mask]
-        mask = eq_ebc[slave] > 0
-        is0 = slave[mask]
-        is1 = master[mask]
+        mask = eq_ebc[self.master] > 0
+        im0 = self.master[mask]
+        im1 = self.slave[mask]
+        mask = eq_ebc[self.slave] > 0
+        is0 = self.slave[mask]
+        is1 = self.master[mask]
         val_ebc[im1] = val_ebc[im0]
         eq_ebc[im1] = eq_ebc[im0]
         val_ebc[is1] = val_ebc[is0]
         eq_ebc[is1] = eq_ebc[is0]
 
-        eq_ebc_final = nm.nonzero(eq_ebc > 0)[0]
-        val_ebc_final = val_ebc[eq_ebc_final]
-        assert_((eq_ebc_final.shape == val_ebc_final.shape))
+        self.eq_ebc = nm.nonzero(eq_ebc > 0)[0]
+        self.val_ebc = val_ebc[self.eq_ebc]
+        assert_((self.eq_ebc.shape == self.val_ebc.shape))
 
-        self.eq[eq_ebc_final] = -2
-        self.eq[master] = -1
+        self.eq[self.eq_ebc] = -2
+        self.eq[self.master] = -1
 
         self._mark_unused(field)
 
-        eqi = self.eq[self.eq >= 0]
-        self.eq[eqi] = nm.arange(eqi.shape[0], dtype=nm.int32)
-        self.eq[master] = self.eq[slave]
-
-        cp = self.constraint_plan
-        cp.set_ebc(eq_ebc_final, val_ebc_final)
-        cp.set_epbc(master, slave)
-        cp.set_equation_mapping(eqi, self.eq, eqi.shape[0])
-        cp.finalize()
+        self.eqi = self.eq[self.eq >= 0]
+        self.eq[self.eqi] = nm.arange(self.eqi.shape[0], dtype=nm.int32)
+        self.eq[self.master] = self.eq[self.slave]
+        self.n_eq = self.eqi.shape[0]
+        self.n_ebc = self.eq_ebc.shape[0]
+        self.n_epbc = self.master.shape[0]
 
         return active_bcs
 

@@ -136,44 +136,6 @@ def create_matrix_graph(rdcs, cdcs, irs, ics, rdi, cdi, active_only=True,
 
     return graph
 
-def create_matrix_graph_from_plans(rdcs, cdcs, irs, ics, rdi, cdi,
-                                   constraint_plans=None, active_only=True,
-                                   chunk_size=200000):
-    """
-    Create the matrix graph using unified constraint plans.
-
-    This function ensures consistent handling of EBC, EPBC, and LCBC
-    constraints when constructing the matrix graph.
-
-    Parameters
-    ----------
-    rdcs, cdcs : list of arrays
-        Row and column DOF connectivities, corresponding to the variables used
-        in the equations.
-    irs, ics : list of ints
-        Row and column block indices for each row and column connectivity pair.
-    rdi, cdi : DofInfo
-        Row and column DOF info.
-    constraint_plans : dict, optional
-        The constraint plans for each variable, keyed by variable name.
-    active_only : bool
-        If True, the matrix graph has reduced size and is created with the
-        reduced (active DOFs only) numbering.
-    chunk_size : int
-        The maximum number of cells added to the graph in one
-        :func:`create_dof_graph()` call.
-
-    Returns
-    -------
-    graph : boolean csr_array
-        The matrix graph.
-    """
-    graph = create_matrix_graph(rdcs, cdcs, irs, ics, rdi, cdi,
-                                active_only=active_only,
-                                chunk_size=chunk_size)
-
-    return graph
-
 class Equations(Container):
 
     @staticmethod
@@ -750,28 +712,6 @@ class Equations(Container):
 
     def get_lcbc_operator(self):
         return self.variables.get_lcbc_operator()
-
-    def get_constraint_plans(self):
-        """
-        Get all constraint plans for state variables.
-
-        Returns
-        -------
-        plans : dict
-            The constraint plans for each variable, keyed by variable name.
-        """
-        return self.variables._get_constraint_plans()
-
-    def has_lcbc(self):
-        """
-        Check if any variable has LCBC constraints.
-
-        Returns
-        -------
-        has_lcbc : bool
-            True if any variable has LCBC constraints.
-        """
-        return self.variables._has_lcbc()
 
     def evaluate(self, names=None, mode='eval', dw_mode='vector',
                  term_mode=None, diff_vars=None, asm_obj=None,

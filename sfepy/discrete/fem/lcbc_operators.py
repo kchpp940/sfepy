@@ -69,46 +69,13 @@ class MRLCBCOperator(LCBCOperator):
 
     def setup(self):
         eq = self.eq_map.eq
-        cp = self.eq_map.constraint_plan
         meq = expand_nodes_to_equations(self.mdofs, self.dof_names,
                                         self.all_dof_names)
         self.ameq = eq[meq]
+        assert_(nm.all(self.ameq >= 0))
 
-        if cp.has_ebc():
-            ebc_mask = nm.isin(meq, cp.ebc_dofs)
-            if nm.any(ebc_mask):
-                self.treat_ebcs(meq, ebc_mask)
-
-        if cp.has_epbc():
-            self.treat_pbcs(meq, cp.epbc_master)
-
-    def treat_ebcs(self, dofs, ebc_mask):
-        """
-        Treat dofs with essential BC by removing them from the LCBC
-        operator, as they are already fixed by EBC.
-        """
-        keep = nm.where(nm.logical_not(ebc_mask))[0]
-        if len(keep) == len(dofs):
-            return
-
-        dofs = dofs[keep]
-        self.ameq = self.ameq[keep]
-
-        if hasattr(self, 'mtx') and self.mtx is not None:
-            if isinstance(self.mtx, sp.sparray):
-                self.mtx = self.mtx.tocsr()
-                self.mtx = self.mtx[keep]
-                self.mtx = self.mtx.tocsc()
-                indptr = nm.unique(self.mtx.indptr)
-                self.mtx = sp.csc_array((self.mtx.data, self.mtx.indices,
-                                         indptr),
-                                        shape=(self.mtx.shape[0],
-                                               indptr.shape[0] - 1))
-            else:
-                self.mtx = self.mtx[keep]
-
-            self.n_mdof = self.mtx.shape[0]
-            self.n_new_dof = self.mtx.shape[1]
+        if self.eq_map.n_epbc:
+            self.treat_pbcs(meq, self.eq_map.master)
 
     def treat_pbcs(self, dofs, master):
         """
@@ -227,24 +194,8 @@ class Rigid2Operator(LCBCOperator):
 
         meq, seq = mvar.eq_map.eq[self.mdofs], svar.eq_map.eq[self.sdofs]
 
-        valid = (meq >= 0) & (seq >= 0)
-        if not nm.all(valid):
-            meq = meq[valid]
-            seq = seq[valid]
-            self.mdofs = self.mdofs[valid]
-            self.sdofs = self.sdofs[valid]
-            mnodes = mnodes[valid[:len(mnodes)]]
-            coors = coors[valid[:len(coors)]]
-            n_nod = coors.shape[0]
-
-        if len(meq) == 0:
-            self.mtx = sp.csr_array((0, 0), dtype=nm.float64)
-            self.ameq = nm.array([], dtype=nm.int32)
-            self.aseq = nm.array([], dtype=nm.int32)
-            self.n_mdof = 0
-            self.n_sdof = 0
-            self.n_new_dof = 0
-            return
+        assert_(nm.all(meq >= 0))
+        assert_(nm.all(seq >= 0))
 
         mcoors = mfield.get_coor(mnodes)
         scoors = sfield.get_coor(snodes)
@@ -320,23 +271,8 @@ class AverageForceOperator(LCBCOperator):
 
         meq, seq = mvar.eq_map.eq[self.mdofs], svar.eq_map.eq[self.sdofs]
 
-        valid = (meq >= 0) & (seq >= 0)
-        if not nm.all(valid):
-            meq = meq[valid]
-            seq = seq[valid]
-            self.mdofs = self.mdofs[valid]
-            self.sdofs = self.sdofs[valid]
-            snodes = snodes[valid[:len(snodes)]]
-            n_nod = len(snodes)
-
-        if len(meq) == 0:
-            self.mtx = sp.csr_array((0, 0), dtype=nm.float64)
-            self.ameq = nm.array([], dtype=nm.int32)
-            self.aseq = nm.array([], dtype=nm.int32)
-            self.n_mdof = 0
-            self.n_sdof = 0
-            self.n_new_dof = 0
-            return
+        assert_(nm.all(meq >= 0))
+        assert_(nm.all(seq >= 0))
 
         mcoors = mfield.get_coor(mnodes)
         scoors = sfield.get_coor(snodes)
@@ -951,25 +887,7 @@ class MultiNodeLCOperator(LCBCOperator):
                                                self.all_dof_names[1])
 
         meq, seq = mvar.eq_map.eq[self.mdofs], svar.eq_map.eq[self.sdofs]
-
-        valid = (meq >= 0) & (seq >= 0)
-        if not nm.all(valid):
-            meq = meq[valid]
-            seq = seq[valid]
-            self.mdofs = self.mdofs[valid]
-            self.sdofs = self.sdofs[valid]
-            smap = smap[valid]
-            constraints = constraints[valid]
-
-        if len(meq) == 0:
-            self.mtx = sp.csr_array((0, 0), dtype=nm.float64)
-            self.ameq = nm.array([], dtype=nm.int32)
-            self.aseq = nm.array([], dtype=nm.int32)
-            self.n_mdof = 0
-            self.n_sdof = 0
-            self.n_new_dof = 0
-            return
-
+        # meq, seq = meq[meq >= 0], seq[seq >= 0]
         dpn = len(dof_names[0])
         ncons = constraints.shape[1]
         smap = smap.reshape((-1, ncons))
@@ -1146,24 +1064,9 @@ class LCBCOperators(Container):
 
         lcbc_mask = nm.ones(n_dof, dtype=bool)
         is_homogeneous = True
-        ebc_dofs = nm.array([], dtype=nm.int32)
-        epbc_master = nm.array([], dtype=nm.int32)
-        epbc_slave = nm.array([], dtype=nm.int32)
-
         for ii, op in enumerate(self):
             rvar_name = op.var_names[0]
             roff = adi.indx[rvar_name].start
-            eq_map = self.variables[rvar_name].eq_map
-            cp = eq_map.constraint_plan
-
-            if cp.has_ebc():
-                ebc_dofs = nm.concatenate((ebc_dofs, roff + cp.ebc_dofs))
-
-            if cp.has_epbc():
-                epbc_master = nm.concatenate((epbc_master,
-                                               roff + cp.epbc_master))
-                epbc_slave = nm.concatenate((epbc_slave,
-                                              roff + cp.epbc_slave))
 
             irs = roff + op.ameq
             lcbc_mask[irs] = False
@@ -1244,28 +1147,6 @@ class LCBCOperators(Container):
                                    dtype=nm.float64)
 
             mtx_lc = mtx_lc + mtx_lc2
-
-        if len(ebc_dofs):
-            ebc_mask = nm.ones(n_dof, dtype=bool)
-            ebc_mask[ebc_dofs] = False
-            ebc_ir = nm.where(ebc_mask)[0]
-
-            ebc_rows = ebc_dofs
-            ebc_cols = nm.arange(len(ebc_dofs), dtype=nm.int32)
-            ebc_data = nm.ones(len(ebc_dofs), dtype=nm.float64)
-
-            ebc_mtx = sp.coo_array((ebc_data, (ebc_rows, ebc_cols)),
-                                   shape=(n_dof, len(ebc_dofs)))
-
-            if not new_only:
-                if vec_lc is not None:
-                    vec_lc[ebc_dofs] = 0.0
-
-        if len(epbc_master):
-            epbc_mask = nm.ones(n_dof, dtype=bool)
-            epbc_mask[epbc_master] = False
-            epbc_mask[epbc_slave] = False
-            epbc_ir = nm.where(epbc_mask)[0]
 
         mtx_lc = mtx_lc.tocsr()
 

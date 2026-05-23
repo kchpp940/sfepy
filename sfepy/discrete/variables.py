@@ -337,8 +337,6 @@ class Variables(Container):
         from sfepy.discrete.common.region import are_disjoint
         if lcbcs is None:
             self.lcdi = self.adi
-            for var in self.iter_state():
-                var.eq_map.constraint_plan.finalize()
             return
 
         self.lcbcs = lcbcs
@@ -384,15 +382,8 @@ class Variables(Container):
         self.has_lcbc = self.mtx_lcbc is not None
         self.has_lcbc_rhs = self.vec_lcbc is not None
 
-        for var in self.iter_state():
-            cp = var.eq_map.constraint_plan
-            for op in ops:
-                if var.name in op.var_names:
-                    cp.add_lcbc(op)
-            cp.finalize()
-
     def get_lcbc_operator(self):
-        if self._has_lcbc():
+        if self.has_lcbc:
             return self.mtx_lcbc
 
         else:
@@ -555,29 +546,6 @@ class Variables(Container):
         vec = nm.zeros((self.adi.n_dof_total,), dtype=self.dtype)
         return vec
 
-    def _has_lcbc(self):
-        """Check if any variable has LCBC constraints using constraint plans."""
-        for var in self.iter_state():
-            cp = var.eq_map.constraint_plan
-            if cp.has_lcbc():
-                return True
-        return False
-
-    def _has_lcbc_rhs(self):
-        """Check if any variable has LCBC constraints with RHS using constraint plans."""
-        for var in self.iter_state():
-            cp = var.eq_map.constraint_plan
-            if cp.has_lcbc_rhs():
-                return True
-        return False
-
-    def _get_constraint_plans(self):
-        """Get all constraint plans for state variables."""
-        plans = {}
-        for var in self.iter_state():
-            plans[var.name] = var.eq_map.constraint_plan
-        return plans
-
     def check_vec_size(self, vec, reduced=False):
         """
         Check whether the shape of the DOF vector corresponds to the
@@ -601,7 +569,7 @@ class Variables(Container):
                 raise ValueError(msg)
 
         else:
-            if self._has_lcbc():
+            if self.has_lcbc:
                 n_dof = self.lcdi.get_n_dof_total()
 
             else:
@@ -627,10 +595,9 @@ class Variables(Container):
         if svec is None:
             svec = nm.empty((self.adi.n_dof_total,), dtype=self.dtype)
         for var in self.iter_state():
-            cp = var.eq_map.constraint_plan
             aindx = self.adi.indx[var.name]
-            svec[aindx] = cp.get_reduced(vec, self.di.indx[var.name].start,
-                                        follow_epbc)
+            svec[aindx] = var.get_reduced(vec, self.di.indx[var.name].start,
+                                          follow_epbc)
         return svec
 
     def make_full_vec(self, svec, force_value=None, vec=None):
@@ -654,8 +621,8 @@ class Variables(Container):
         """
         self.check_vec_size(svec, reduced=True)
 
-        if self._has_lcbc():
-            if self._has_lcbc_rhs():
+        if self.has_lcbc:
+            if self.has_lcbc_rhs:
                 svec = self.mtx_lcbc @ svec + self.vec_lcbc
 
             else:
@@ -664,10 +631,9 @@ class Variables(Container):
         if vec is None:
             vec = self.create_vec()
         for var in self.iter_state():
-            cp = var.eq_map.constraint_plan
             indx = self.di.indx[var.name]
             aindx = self.adi.indx[var.name]
-            cp.get_full(svec, aindx.start, force_value, vec, indx.start)
+            var.get_full(svec, aindx.start, force_value, vec, indx.start)
 
         return vec
 
@@ -719,17 +685,7 @@ class Variables(Container):
             self.invalidate_evaluate_caches(step=0)
 
         for var in self.iter_state():
-            cp = var.eq_map.constraint_plan
-            cp.apply_to_vector(vec, self.di.indx[var.name].start)
-            if force_values is not None:
-                if isinstance(force_values, dict):
-                    fv = force_values.get(var.name, None)
-                    if fv is not None:
-                        ii = self.di.indx[var.name].start + cp.ebc_dofs
-                        vec[ii] = fv
-                else:
-                    ii = self.di.indx[var.name].start + cp.ebc_dofs
-                    vec[ii] = force_values
+            var.apply_ebc(vec, self.di.indx[var.name].start, force_values)
 
     def apply_ic(self, vec=None, force_values=None):
         """
@@ -749,28 +705,8 @@ class Variables(Container):
 
         ok = True
         for var in self.iter_state():
-            cp = var.eq_map.constraint_plan
-            ii = self.di.indx[var.name]
-            _ok = True
-            if cp.has_ebc():
-                ebc_dofs = ii.start + cp.ebc_dofs
-                if force_values is None:
-                    if not nm.allclose(vec[ebc_dofs], cp.ebc_values):
-                        _ok = False
-                else:
-                    if isinstance(force_values, dict):
-                        fv = force_values.get(var.name, None)
-                        if fv is not None:
-                            if not nm.allclose(vec[ebc_dofs], fv):
-                                _ok = False
-                    else:
-                        if not nm.allclose(vec[ebc_dofs], force_values):
-                            _ok = False
-            if cp.has_epbc():
-                ebc_master = ii.start + cp.epbc_master
-                ebc_slave = ii.start + cp.epbc_slave
-                if not nm.allclose(vec[ebc_master], vec[ebc_slave]):
-                    _ok = False
+            _ok = self[var.name].has_ebc(vec=vec[self.di.indx[var.name]],
+                                         force_values=force_values)
             ok = ok and _ok
 
             if verbose:
@@ -837,7 +773,7 @@ class Variables(Container):
         """
         self.vec[:] = self.make_full_vec(r_vec)
 
-        if self._has_lcbc():
+        if self.has_lcbc:
             self.r_vec = r_vec
 
         if not preserve_caches:
@@ -847,7 +783,7 @@ class Variables(Container):
         """
         Get the reduced DOF vector, with EBC and PBC DOFs removed.
         """
-        if self._has_lcbc():
+        if self.has_lcbc:
             if self.r_vec is None:
                 if force:
                     r_vec = self.reduce_vec(self.vec, follow_epbc=follow_epbc)
@@ -872,7 +808,7 @@ class Variables(Container):
         to the given variable. If `force` is True, setting variables
         with LCBC DOFs is allowed.
         """
-        if self._has_lcbc():
+        if self.has_lcbc:
             if not force:
                 raise ValueError('cannot set full DOF vector with LCBCs!')
 
@@ -932,7 +868,7 @@ class Variables(Container):
         force : bool
             If True, proceed even with LCBCs present.
         """
-        if self._has_lcbc() and not force:
+        if self.has_lcbc and not force:
             raise ValueError('cannot set full DOF vector with LCBCs!')
 
         if vec is None:
@@ -1625,10 +1561,12 @@ class FieldVariable(Variable):
             eq_map = self.eq_map
             seq_map = svar.eq_map
             eq_map.eq = seq_map.eq
-            eq_map.constraint_plan.set_ebc(seq_map.eq_ebc, seq_map.val_ebc)
-            eq_map.constraint_plan.set_epbc(seq_map.master, seq_map.slave)
-            eq_map.constraint_plan.set_equation_mapping(seq_map.eqi, seq_map.eq,
-                                                       seq_map.n_eq)
+            eq_map.eq_ebc = seq_map.eq_ebc
+            eq_map.eqi = seq_map.eqi
+            eq_map.master = seq_map.master
+            eq_map.n_eq = seq_map.n_eq
+            eq_map.slave = seq_map.slave
+            eq_map.val_ebc = seq_map.val_ebc
 
             self.n_adof = eq_map.n_eq
 
@@ -1868,20 +1806,21 @@ class FieldVariable(Variable):
         vector `vec`, starting at `offset`.
         """
         eq_map = self.eq_map
-        cp = eq_map.constraint_plan
+        ii = offset + eq_map.eq_ebc
 
+        # EBC,
         if force_values is None:
-            cp.apply_ebc_to_vector(vec, offset)
+            vec[ii] = eq_map.val_ebc
 
         else:
-            ii = offset + cp.ebc_dofs
             if isinstance(force_values, dict):
                 vec[ii] = force_values[self.name]
 
             else:
                 vec[ii] = force_values
 
-        cp.apply_epbc_to_vector(vec, offset)
+        # EPBC.
+        vec[offset+eq_map.master] = vec[offset+eq_map.slave]
 
     def apply_ic(self, vec, offset=0, force_values=None):
         """
@@ -1902,10 +1841,9 @@ class FieldVariable(Variable):
 
     def has_ebc(self, vec=None, force_values=None):
         eq_map = self.eq_map
-        cp = eq_map.constraint_plan
-        ii = cp.ebc_dofs
+        ii = eq_map.eq_ebc
         if force_values is None:
-            if not nm.allclose(vec[ii], cp.ebc_values):
+            if not nm.allclose(vec[ii], eq_map.val_ebc):
                 return False
         else:
             if isinstance(force_values, dict):
@@ -1915,7 +1853,7 @@ class FieldVariable(Variable):
                 if not nm.allclose(vec[ii], force_values):
                     return False
         # EPBC.
-        if not nm.allclose(vec[cp.epbc_master], vec[cp.epbc_slave]):
+        if not nm.allclose(vec[eq_map.master], vec[eq_map.slave]):
             return False
 
         return True
@@ -1933,9 +1871,17 @@ class FieldVariable(Variable):
         vectors it should be set to True.
         """
         eq_map = self.eq_map
-        cp = eq_map.constraint_plan
+        ii = offset + eq_map.eqi
 
-        return cp.get_reduced(vec, offset, follow_epbc)
+        r_vec = vec[ii]
+
+        if follow_epbc:
+            master = offset + eq_map.master
+            slave = eq_map.eq[eq_map.slave]
+            ii = slave >= 0
+            la.assemble1d(r_vec, slave[ii], vec[master[ii]])
+
+        return r_vec
 
     def get_full(self, r_vec, r_offset=0, force_value=None,
                  vec=None, offset=0):
@@ -1950,10 +1896,23 @@ class FieldVariable(Variable):
         `vec` argument can be provided to store the full vector (in
         place) starting at `offset`.
         """
-        eq_map = self.eq_map
-        cp = eq_map.constraint_plan
+        if vec is None:
+            vec = nm.empty(self.n_dof, dtype=r_vec.dtype)
 
-        vec = cp.get_full(r_vec, r_offset, force_value, vec, offset)
+        else:
+            vec = vec[offset:offset+self.n_dof]
+
+        eq_map = self.eq_map
+        r_vec = r_vec[r_offset:r_offset+eq_map.n_eq]
+
+        # EBC.
+        vec[eq_map.eq_ebc] = get_default(force_value, eq_map.val_ebc)
+
+        # Reduced vector values.
+        vec[eq_map.eqi] = r_vec
+
+        # EPBC.
+        vec[eq_map.master] = vec[eq_map.slave]
 
         unused_dofs = self.field.get('unused_dofs')
         if unused_dofs is not None:

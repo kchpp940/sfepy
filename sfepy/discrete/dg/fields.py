@@ -622,12 +622,11 @@ class DGField(FEField):
             Updated incidence array.
         """
 
-        cp = eq_map.constraint_plan
         # treat classical FEM EPBCs - we need to correct neighbours
-        if cp.has_epbc():
+        if eq_map.n_epbc > 0:
             # set neighbours of periodic cells to one another
-            mcells = nm.unique(self.dofs2cells[cp.epbc_master])
-            scells = nm.unique(self.dofs2cells[cp.epbc_slave])
+            mcells = nm.unique(self.dofs2cells[eq_map.master])
+            scells = nm.unique(self.dofs2cells[eq_map.slave])
             mcells_facets = nm.array(
                 nm.where(facet_neighbours[mcells] == -1))[1, 0]  # facets mcells
             scells_facets = nm.array(
