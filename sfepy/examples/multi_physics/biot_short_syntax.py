@@ -85,24 +85,6 @@ def get_pars(ts, coor, mode, **kwargs):
 
         return out
 
-def post_process(out, pb, state, extend=False):
-    """
-    Compute derived quantities of interest..
-    """
-    from sfepy.base.base import Struct
-
-    dvel = pb.evaluate('ev_diffusion_velocity.i.Omega(m.K, p)',
-                       mode='el_avg')
-    out['dvel'] = Struct(name='output_data',
-                         mode='cell', data=dvel, dofs=None)
-
-    stress = pb.evaluate('ev_cauchy_stress.i.Omega(m.D, u)',
-                         mode='el_avg')
-    out['cauchy_stress'] = Struct(name='output_data',
-                                  mode='cell', data=stress, dofs=None)
-
-    return out
-
 # Mesh dimensions.
 dims = [0.1, 0.1]
 
@@ -303,5 +285,10 @@ options = {
     'nls' : 'newton',
     'ls' : 'iterative-s',
 
-    'post_process_hook' : 'post_process',
+    'export_config': {
+        'derived_quantities': [
+            ('dvel', 'ev_diffusion_velocity.i.Omega(m.K, p)'),
+            ('cauchy_stress', 'ev_cauchy_stress.i.Omega(m.D, u)'),
+        ],
+    },
 }

@@ -840,7 +840,9 @@ class Problem(Struct):
 
     def save_state(self, filename, state=None, out=None,
                    fill_value=None, post_process_hook=None,
-                   linearization=None, split_results_by=None, **kwargs):
+                   linearization=None, split_results_by=None,
+                   export_config=None, file_format=None, ts=None,
+                   **kwargs):
         """
         Parameters
         ----------
@@ -852,7 +854,39 @@ class Problem(Struct):
             The linearization configuration for higher order
             approximations. If its kind is 'adaptive', `split_results_by` is
             assumed 'variable'.
+        export_config : :class:`ResultExportConfig` or None, optional
+            If provided, it provides the variable selection, derived
+            quantities, ``split_results_by``, output file format and the
+            default ``var_name`` used to tag derived quantities when
+            ``split_results_by == 'variable'``.  The ``post_process_hook``
+            (if any) is applied after the configuration derived hooks, so
+            users can still amend the output.
+        file_format : str or None, optional
+            Explicit ``file_format`` argument.  Overrides both the
+            configuration's ``file_format`` and the problem's
+            ``output_format``.
+        ts : TimeStepper, optional
+            The active time stepper (used only to propagate through to
+            downstream hooks).
         """
+        from sfepy.discrete.export_config import make_post_process_hook
+
+        if export_config is not None:
+            split_results_by = get_default(
+                split_results_by, export_config.get_split_results_by()
+            )
+            kwargs.update(export_config.extra_options)
+            file_format = get_default(
+                file_format,
+                export_config.resolve_file_format(
+                    problem_format=self.output_format,
+                ),
+            )
+
+        file_format = get_default(file_format, self.file_format)
+        if file_format is not None:
+            kwargs.setdefault('io', file_format)
+
         linearization = get_default(linearization, self.linearization)
         if linearization.kind != 'adaptive':
             split_results_by = get_default(split_results_by,
@@ -861,11 +895,37 @@ class Problem(Struct):
         else:
             split_results_by = 'variable'
 
+        self.validate_export_config(export_config, state=state,
+                                     filename=filename)
+
         if (out is None) and (state is not None):
             extend = split_results_by not in ['variable', 'region']
-            out = state.create_output(fill_value=fill_value,
-                                      extend=extend,
-                                      linearization=linearization)
+            var_info = None
+            if export_config is not None and hasattr(state, 'iter_state'):
+                var_info = export_config.build_var_info(state)
+
+            if var_info is not None:
+                out = state.create_output(fill_value=fill_value,
+                                          extend=extend,
+                                          linearization=linearization,
+                                          var_info=var_info)
+            else:
+                out = state.create_output(fill_value=fill_value,
+                                          extend=extend,
+                                          linearization=linearization)
+
+            default_var_name = None
+            if export_config is not None and hasattr(state, 'iter_state') \
+                    and split_results_by == 'variable':
+                try:
+                    default_var_name = next(state.iter_state()).name
+                except StopIteration:
+                    default_var_name = None
+
+            if export_config is not None and export_config.derived_quantities:
+                cfg_hook = make_post_process_hook(export_config)
+                out = cfg_hook(out, self, state, extend=extend,
+                               default_var_name=default_var_name)
 
             if post_process_hook is not None:
                 out = post_process_hook(out, self, state, extend=extend)
@@ -1014,6 +1074,82 @@ class Problem(Struct):
         filename = '%s.%s' % (filename_trunk, self.output_format)
         self.domain.save_regions_as_groups(filename,
                                            region_names=region_names)
+
+    def export_results(self, export_config, state=None, out=None,
+                       suffix=None, ts=None, **kwargs):
+        """Save the state using a :class:`ResultExportConfig`.
+
+        This is a thin convenience wrapper around :func:`save_state` that
+        resolves the output filename, format and split mode from the
+        configuration, so callers do not have to replicate the plumbing.
+
+        Parameters
+        ----------
+        export_config : :class:`ResultExportConfig`
+            The configuration describing which variables to write, which
+            derived quantities to compute and the output file format /
+            naming.
+        state : Variables, optional
+            The state to export.
+        out : dict, optional
+            A pre-built output dictionary; passed through to
+            :func:`save_state`.
+        suffix : str, optional
+            Suffix appended to the output filename (used by the time
+            stepping machinery).
+        ts : TimeStepper, optional
+            The active time stepper, forwarded to :func:`save_state`.
+        **kwargs
+            Additional keyword arguments forwarded to :func:`save_state`.
+        """
+        from sfepy.discrete.export_config import ResultExportConfig
+
+        if not isinstance(export_config, ResultExportConfig):
+            raise TypeError('export_config must be a ResultExportConfig'
+                            ' instance, got %r' % type(export_config))
+
+        default_name = self.get_output_name()
+        filename = export_config.resolve_filename(
+            default=default_name,
+            problem_trunk=self.ofn_trunk,
+            step_suffix=suffix,
+        )
+
+        file_format = export_config.resolve_file_format(
+            problem_format=self.output_format,
+        )
+        kwargs.setdefault('file_format', file_format)
+        if ts is not None:
+            kwargs.setdefault('ts', ts)
+
+        export_config.validate_runtime(self, state=state, filename=filename)
+
+        self.save_state(filename, state=state, out=out,
+                        export_config=export_config, **kwargs)
+        return filename
+
+    def validate_export_config(self, export_config=None, state=None,
+                                filename=None):
+        """Apply runtime validation to the provided export configuration.
+
+        The method is a no-op when ``export_config`` is ``None``.  Otherwise
+        it calls :meth:`ResultExportConfig.validate_runtime` with the
+        problem instance and (optionally) the state / filename so that
+        variable-name mismatches, broken derived-quantity expressions and
+        unwritable output paths fail fast with a clear ``ValueError``.
+
+        Parameters
+        ----------
+        export_config : :class:`ResultExportConfig` or None
+        state : Variables, optional
+        filename : str, optional
+        """
+        if export_config is None:
+            return None
+        export_config.validate_runtime(
+            self, state=state, filename=filename,
+        )
+        return export_config
 
     def get_evaluator(self, reuse=False):
         """
@@ -1294,7 +1430,8 @@ class Problem(Struct):
 
     def get_tss_functions(self, update_bcs=True, update_materials=True,
                           save_results=True,
-                          step_hook=None, post_process_hook=None):
+                          step_hook=None, post_process_hook=None,
+                          export_config=None):
         """
         Get the problem-dependent functions required by the time-stepping
         solver during the solution process.
@@ -1314,6 +1451,11 @@ class Problem(Struct):
         post_process_hook : callable, optional
             The optional user-defined function that is passed in each
             `poststep_fun` to :func:`Problem.save_state()`.
+        export_config : :class:`ResultExportConfig` or None, optional
+            If provided, forwarded to :func:`Problem.save_state()` so the
+            declarative export description (variable selection, derived
+            quantities, file format and naming) is applied automatically
+            at every time step.
 
         Returns
         -------
@@ -1373,12 +1515,25 @@ class Problem(Struct):
                 else:
                     suffix = None
 
-                filename = self.get_output_name(suffix=suffix)
+                if export_config is not None:
+                    filename = export_config.resolve_filename(
+                        default=self.get_output_name(),
+                        problem_trunk=self.ofn_trunk,
+                        step_suffix=suffix,
+                    )
+                    file_format = export_config.resolve_file_format(
+                        problem_format=self.output_format,
+                    )
+                else:
+                    filename = self.get_output_name(suffix=suffix)
+                    file_format = self.file_format
+
                 self.save_state(filename, variables,
                                 post_process_hook=post_process_hook,
+                                export_config=export_config,
                                 split_results_by=None,
-                                ts=ts,
-                                file_format=self.file_format)
+                                file_format=file_format,
+                                ts=ts)
 
             self.advance(ts)
             return vec
@@ -1447,6 +1602,7 @@ class Problem(Struct):
               save_results=True,
               step_hook=None, post_process_hook=None,
               post_process_hook_final=None,
+              export_config=None,
               report_nls_status=False, log_nls_status=False,
               verbose=True):
         """
@@ -1491,6 +1647,13 @@ class Problem(Struct):
         post_process_hook_final : callable, optional
             The optional user-defined function that is called after the
             top-level solver returns.
+        export_config : :class:`ResultExportConfig` or None, optional
+            The declarative result export description (variable selection,
+            derived quantities, file format and naming).  When ``None``,
+            the value is taken from ``self.conf.options.export_config`` so
+            that problems can enable the configuration directly in their
+            ``options`` dictionary.  Passed to :func:`Problem.save_state`
+            at every time step.
         report_nls_status: bool, optional
             If True, print summary non-linear solver info.
         log_nls_status: bool, optional
@@ -1516,11 +1679,16 @@ class Problem(Struct):
         log_nls_status = getattr(
             self.conf.options, 'log_nls_status', log_nls_status)
 
+        if export_config is None:
+            export_config = getattr(
+                self.conf.options, 'export_config', None)
+
         if self.conf.options.get('block_solve', False):
             variables = self.block_solve(state0, status=status,
                                          save_results=save_results,
                                          step_hook=step_hook,
                                          post_process_hook=post_process_hook,
+                                         export_config=export_config,
                                          report_nls_status=report_nls_status,
                                          log_nls_status=log_nls_status,
                                          verbose=verbose)
@@ -1544,7 +1712,8 @@ class Problem(Struct):
             init_fun, prestep_fun, poststep_fun = self.get_tss_functions(
                 update_bcs=update_bcs, update_materials=update_materials,
                 save_results=save_results,
-                step_hook=step_hook, post_process_hook=post_process_hook)
+                step_hook=step_hook, post_process_hook=post_process_hook,
+                export_config=export_config)
 
             tss.set_dof_info(variables.adi)
             vec = tss(variables.get_state(self.active_only, force=True),
@@ -1599,6 +1768,7 @@ class Problem(Struct):
 
     def block_solve(self, state0=None, status=None, save_results=True,
                     step_hook=None, post_process_hook=None,
+                    export_config=None,
                     report_nls_status=False, log_nls_status=False,
                     verbose=True):
         """
@@ -1666,9 +1836,23 @@ class Problem(Struct):
             step_hook(self, None, variables)
 
         if save_results:
-            self.save_state(self.get_output_name(), variables,
+            if export_config is not None:
+                filename = export_config.resolve_filename(
+                    default=self.get_output_name(),
+                    problem_trunk=self.ofn_trunk,
+                )
+                file_format = export_config.resolve_file_format(
+                    problem_format=self.output_format,
+                )
+            else:
+                filename = self.get_output_name()
+                file_format = self.file_format
+
+            self.save_state(filename, variables,
                             post_process_hook=post_process_hook,
-                            split_results_by=None)
+                            export_config=export_config,
+                            split_results_by=None,
+                            file_format=file_format)
 
         return variables
 

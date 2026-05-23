@@ -30,36 +30,16 @@ from sfepy import data_dir
 from sfepy.discrete.fem import MeshIO
 from sfepy.mechanics.matcoefs import stiffness_from_lame
 
-def post_process(out, pb, state, extend=False):
-    """
-    Calculate and output the strain and stresses for the given state.
-    """
-    from sfepy.base.base import Struct
+def _extend_piezo(data, problem, state, extend):
     from sfepy.discrete.fem import extend_cell_data
+    return extend_cell_data(data, problem.domain, 'Y2', val=0.0)
 
-    ev = pb.evaluate
-    strain = ev('ev_cauchy_strain.i.Y(u)', mode='el_avg')
-    stress = ev('ev_cauchy_stress.i.Y(inclusion.D, u)', mode='el_avg')
 
-    piezo = -ev('ev_piezo_stress.i.Y2(inclusion.coupling, phi)',
-                mode='el_avg')
-    piezo = extend_cell_data(piezo, pb.domain, 'Y2', val=0.0)
+def _total_stress(data, problem, state, extend):
+    return problem.evaluate(
+        'ev_cauchy_stress.i.Y(inclusion.D, u)', mode='el_avg'
+    ) + data
 
-    piezo_strain = ev('ev_piezo_strain.i.Y(inclusion.coupling, u)',
-                      mode='el_avg')
-
-    out['cauchy_strain'] = Struct(name='output_data', mode='cell',
-                                  data=strain, dofs=None)
-    out['elastic_stress'] = Struct(name='output_data', mode='cell',
-                                   data=stress, dofs=None)
-    out['piezo_stress'] = Struct(name='output_data', mode='cell',
-                                 data=piezo, dofs=None)
-    out['piezo_strain'] = Struct(name='output_data', mode='cell',
-                                 data=piezo_strain, dofs=None)
-    out['total_stress'] = Struct(name='output_data', mode='cell',
-                                 data=stress + piezo, dofs=None)
-
-    return out
 
 filename_mesh = data_dir + '/meshes/2d/special/circle_in_square.mesh'
 ## filename_mesh = data_dir + '/meshes/2d/special/circle_in_square_small.mesh'
@@ -78,7 +58,21 @@ geom = {3 : '3_4', 2 : '2_3'}[dim]
 x_left, x_right = bbox[:,0]
 
 options = {
-    'post_process_hook' : 'post_process',
+    'export_config': {
+        'derived_quantities': [
+            ('cauchy_strain', 'ev_cauchy_strain.i.Y(u)'),
+            ('elastic_stress',
+             'ev_cauchy_stress.i.Y(inclusion.D, u)'),
+            ('piezo_stress',
+             '- ev_piezo_stress.i.Y2(inclusion.coupling, phi)',
+             {'transform': _extend_piezo}),
+            ('piezo_strain',
+             'ev_piezo_strain.i.Y(inclusion.coupling, u)'),
+            ('total_stress',
+             '- ev_piezo_stress.i.Y2(inclusion.coupling, phi)',
+             {'transform': _total_stress}),
+        ],
+    },
 }
 
 regions = {

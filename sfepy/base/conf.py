@@ -27,7 +27,7 @@ _required = ['filename_mesh|filename_domain', 'field_[0-9]+|fields',
 _other = ['epbc_[0-9]+|epbcs',
           'lcbc_[0-9]+|lcbcs', 'nbc_[0-9]+|nbcs',
           'ic_[0-9]+|ics', 'function_[0-9]+|functions', 'options',
-          'integral_[0-9]+|integrals']
+          'integral_[0-9]+|integrals', 'export_config']
 
 def get_standard_keywords():
     return copy(_required), copy(_other)

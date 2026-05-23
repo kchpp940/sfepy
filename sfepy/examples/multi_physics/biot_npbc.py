@@ -92,30 +92,23 @@ def get_pars(ts, coor, mode, output_dir='.', **kwargs):
 
         return out
 
-def post_process(out, pb, state, extend=False):
-    from sfepy.base.base import Struct
-
-    dvel = pb.evaluate('ev_diffusion_velocity.i.Omega( m.K, p )',
-                       mode='el_avg')
-    out['dvel'] = Struct(name='output_data',
-                         mode='cell', data=dvel, dofs=None)
-
-    stress = pb.evaluate('ev_cauchy_stress.i.Omega( m.D, u )',
-                         mode='el_avg')
-    out['cauchy_stress'] = Struct(name='output_data',
-                                  mode='cell', data=stress, dofs=None)
-    return out
-
 def define_input(filename, output_dir):
 
     filename_mesh = filename
     options = {
         'output_dir' : output_dir,
         'output_format' : 'vtk',
-        'post_process_hook' : 'post_process',
 
         'ls' : 'ls',
         'nls' : 'newton',
+        'export_config': {
+            'derived_quantities': [
+                ('dvel', 'ev_diffusion_velocity.i.Omega( m.K, p )',
+                 {'out_kwargs': {'var_name': 'p'}}),
+                ('cauchy_stress', 'ev_cauchy_stress.i.Omega( m.D, u )',
+                 {'out_kwargs': {'var_name': 'u'}}),
+            ],
+        },
     }
 
     functions = {
