@@ -112,7 +112,7 @@ def region_leaf(domain, regions, rdef, functions, tdim):
         elif token == 'E_VOG':
             group = int(details[3])
 
-            region.vertices = nm.where(domain.mesh.get_vertex_groups() == group)[0]
+            region.vertices = nm.where(cmesh.vertex_groups == group)[0]
 
         elif token == 'E_VOSET':
             try:
@@ -204,7 +204,8 @@ class Domain(Struct):
 
         aux = mesh.from_region(region, mesh, tdim=tdim)
         cmesh = aux.cmesh
-        new_mat_id = nm.max([nm.max(mesh.get_cell_groups(d)) for d in mesh.descs]) + 1
+        new_mat_id = nm.max([nm.max(k.cell_groups) for k in mesh.cmesh_tdim
+                             if k is not None]) + 1
         cmesh.cell_groups[:] = new_mat_id
         mesh.cmesh_tdim[tdim] = cmesh
         mesh.descs += aux.descs
@@ -392,13 +393,11 @@ class Domain(Struct):
                 break
 
         out = {}
-        vgroups = aux.get_vertex_groups().copy()
-        cgroups_dict = {d: aux.get_cell_groups(d).copy() for d in aux.descs}
         for name in names:
             region = self.regions[name]
             output(region.name)
 
-            vgroups[region.vertices] = n_ig
+            aux.cmesh.vertex_groups[region.vertices] = n_ig
             n_ig += 1
 
             mask = nm.zeros((n_nod, 1), dtype=nm.float64)
@@ -408,18 +407,8 @@ class Domain(Struct):
 
             if region.has_cells():
                 ii = region.get_cells()
-                for desc in aux.descs:
-                    cmesh = aux.get_cmesh(desc)
-                    cells = nm.where(cmesh.cell_types == cmesh.key_to_index[desc])[0]
-                    common = nm.intersect1d(ii, cells)
-                    if len(common) > 0:
-                        local_idx = nm.where(nm.isin(cells, common))[0]
-                        cgroups_dict[desc][local_idx] = c_ig
+                aux.cmesh.cell_groups[ii] = c_ig
                 c_ig += 1
-
-        aux.set_vertex_groups(vgroups)
-        for desc in aux.descs:
-            aux.set_cell_groups(cgroups_dict[desc], desc)
 
         aux.write(filename, io='auto', out=out)
         output('...done')

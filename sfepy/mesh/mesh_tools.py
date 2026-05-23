@@ -483,7 +483,7 @@ def get_mesh_by_cgroup(mesh, value, cell_vertices_only=True):
 
     for desc in mesh.descs:
         conns, cidxs = mesh.get_conn(desc, ret_cells=True)
-        mat_ids = mesh.get_cell_groups(desc)
+        mat_ids = mesh.cmesh.cell_groups[cidxs]
 
         if isinstance(value, tuple):
             ncidxs = nm.logical_and(mat_ids >= value[0], mat_ids <= value[1])
@@ -498,7 +498,7 @@ def get_mesh_by_cgroup(mesh, value, cell_vertices_only=True):
             new_descs.append(desc)
 
     out = Mesh.from_data(mesh.name, mesh.coors,
-                         mesh.get_vertex_groups(),
+                         mesh.cmesh.vertex_groups,
                          new_conns, new_mat_ids, new_descs)
 
     if cell_vertices_only:
@@ -525,7 +525,7 @@ def get_mesh_by_ngroup(mesh, value, cell_vertices_only=True):
     out: Mesh
         FE mesh
     """
-    vgroups = mesh.get_vertex_groups()
+    vgroups = mesh.cmesh.vertex_groups
     if isinstance(value, tuple):
         vidxs = nm.logical_and(vgroups >= value[0], vgroups <= value[1])
     elif isinstance(value, list):
@@ -542,7 +542,7 @@ def get_mesh_by_ngroup(mesh, value, cell_vertices_only=True):
     new_conns, new_mat_ids, new_descs = [], [], []
     for desc in mesh.descs:
         conns, cidxs = mesh.get_conn(desc, ret_cells=True)
-        mat_ids = mesh.get_cell_groups(desc)
+        mat_ids = mesh.cmesh.cell_groups[cidxs]
         ncidxs = (remap[conns] >= 0).sum(axis=1) == conns.shape[1]
 
         if ncidxs.sum() > 0:

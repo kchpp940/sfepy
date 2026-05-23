@@ -451,10 +451,10 @@ class MeshioLibIO(MeshIO):
                 cells.append(c.data)
                 cell_types.append(self.cell_types[(c.type, dim)])
 
-                if cgdata is not None:
-                    cgroups.append(nm.asarray(cgdata[ic]).flatten())
-                else:
-                    cgroups.append(nm.ones((len(c.data),), dtype=nm.int32))
+            if cgdata is not None:
+                cgroups.append(nm.asarray(cgdata[ic]).flatten())
+            else:
+                cgroups.append(nm.ones((len(c.data),), dtype=nm.int32))
 
         mesh._set_io_data(m.points[:,:dim], ngroups,
                           cells, cgroups, cell_types)
@@ -510,11 +510,11 @@ class MeshioLibIO(MeshIO):
             ngkey = '%s:ref' % self.file_format
             cgkey = '%s:ref' % self.file_format
         point_data[ngkey] = ngroups
-        point_sets = mesh.get_vertex_group_mapping()
-
-        cgrps = mesh.get_unique_cell_groups()
-        cell_group_mapping = mesh.get_group_mapping()
-
+        point_sets = {str(k): nm.where(ngroups == k)[0]
+                      for k in nm.unique(ngroups)}
+        cell_groups = [mesh.get_cmesh(desc).cell_groups for desc in descs]
+        cgrps = nm.unique(nm.hstack(cell_groups))
+        # meshio.__version__ > 3.3.2
         cells = []
         cgroups = []
         cell_data = {k: [] for k in cell_data_keys}
@@ -525,13 +525,13 @@ class MeshioLibIO(MeshIO):
             cidxs = nm.where(cmesh.cell_types == cmesh.key_to_index[desc])
             cidxs = cidxs[0].astype(nm.uint32)
 
-            cgroups.append(mesh.get_cell_groups(desc))
+            cgroups.append(cmesh.cell_groups[cidxs])
             for k in cell_data_keys:
                 cell_data[k].append(out[k].data[cidxs, 0, :, 0])
 
-            if desc in cell_group_mapping:
-                for k_str, idxs in cell_group_mapping[desc].items():
-                    cell_sets[k_str].append(idxs)
+            for k in cgrps:
+                idxs = nm.where(cmesh.cell_groups[cidxs] == k)[0]
+                cell_sets[str(k)].append(cidxs[idxs])
 
         if self.file_format in ['vtk', 'vtk-ascii', 'vtk-binary', 'vtu']:
             point_sets, cell_sets = None, None

@@ -298,14 +298,14 @@ def main():
         mesh = Mesh.from_data(mesh.name, *data)
 
     if options.remap_vertex_groups:
-        vgs = mesh.get_unique_vertex_groups()
-        remap = {old: new for old, new in zip(vgs, nm.arange(len(vgs)))}
-        mesh.remap_vertex_groups(remap)
+        vgs = nm.unique(mesh.cmesh.vertex_groups)
+        remap = prepare_translate(vgs, nm.arange(len(vgs)))
+        mesh.cmesh.vertex_groups[:] = remap[mesh.cmesh.vertex_groups]
 
     if options.remap_cell_groups:
-        cgs = mesh.get_unique_cell_groups()
-        remap = {old: new for old, new in zip(cgs, nm.arange(len(cgs)))}
-        mesh.remap_cell_groups(remap)
+        cgs = nm.unique(mesh.cmesh.cell_groups)
+        remap = prepare_translate(cgs, nm.arange(len(cgs)))
+        mesh.cmesh.cell_groups[:] = remap[mesh.cmesh.cell_groups]
 
     if scale is not None:
         if len(scale) == 1:
@@ -343,21 +343,19 @@ def main():
     if options.merge:
         desc = mesh.descs[0]
         coor, ngroups, conns = fix_double_nodes(mesh.coors,
-                                                mesh.get_vertex_groups(),
+                                                mesh.cmesh.vertex_groups,
                                                 mesh.get_conn(desc))
         mesh = Mesh.from_data(mesh.name + '_merged',
                               coor, ngroups,
-                              [conns], [mesh.get_cell_groups(desc)], [desc])
+                              [conns], [mesh.cmesh.cell_groups], [desc])
 
     if options.cell_vertices_only:
         mesh = mt.get_cell_vertices_only(mesh)
 
     if options.save_per_mat:
         desc = mesh.descs[0]
-        conns = mesh.get_conn(desc)
-        cgroups = mesh.get_cell_groups(desc)
-        coors = mesh.coors
-        ngroups = mesh.get_vertex_groups()
+        conns, cgroups = mesh.get_conn(desc), mesh.cmesh.cell_groups
+        coors, ngroups = mesh.coors, mesh.cmesh.vertex_groups
         mat_ids = nm.unique(cgroups)
 
         for mat_id in mat_ids:
