@@ -17,6 +17,13 @@ def coef_arrays_to_dicts(idict, format='%s/%d'):
 class Coefficients(Struct):
     """
     Class for storing (homogenized) material coefficients.
+
+    When produced by :class:`HomogenizationEngine`, the instance may
+    carry ``cache_context_key`` and ``cache_context`` attributes that
+    uniquely identify the material parameters, frequency point, region
+    dependency and output file name used to compute it.  These are
+    persisted to/loaded from HDF5 so that downstream consumers (e.g.
+    recovery) can detect cache collisions across configurations.
     """
 
     @staticmethod
@@ -30,7 +37,25 @@ class Coefficients(Struct):
 
         return obj
 
-    def to_file_hdf5(self, filename):
+    def to_file_hdf5(self, filename, context=None):
+        """
+        Write coefficients to HDF5.
+
+        Parameters
+        ----------
+        filename : str
+            Destination file path.
+        context : CoefficientContext or None
+            If provided, the cache-key and context dictionary are
+            embedded in the file so that downstream consumers can
+            detect cache collisions across configurations.
+        """
+        if context is not None:
+            self.cache_context_key = context.get_cache_key()
+            self.cache_context = {
+                k: v for k, v in context.__dict__.items()
+                if not k.startswith('_')
+            }
         write_dict_hdf5(filename, self.__dict__)
 
     def _escape_latex(self, txt):

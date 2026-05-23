@@ -42,10 +42,12 @@ def post_process(out, pb, state, extend=False):
 
     pvar = pb.create_variables(['svar'])
 
+    context = getattr(pb, '_homog_context', None)
     recover_micro_hook(pb.conf.filename_micro, rreg, macro, pb.conf.eps0,
                        region_mode=pb.conf.region_mode,
                        eval_mode=pb.conf.eval_mode,
-                       eval_vars=pvar, define_args=def_args)
+                       eval_vars=pvar, define_args=def_args,
+                       context=context)
 
     return out
 
@@ -71,7 +73,8 @@ def get_homog(coors, mode, pb, micro_filename, **kwargs):
     coefs = get_homog_coefs_linear(0, 0, None,
                                    micro_filename=micro_filename,
                                    coefs_filename=coefs_filename,
-                                   define_args=def_args)
+                                   define_args=def_args,
+                                   problem=pb)
 
     Vf = coefs['V0'] * pb.conf.phi[0] + coefs['V1'] * pb.conf.phi[1]
 

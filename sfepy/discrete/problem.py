@@ -34,382 +34,43 @@ def make_is_save(options):
     """
     Given problem options, return a callable that determines whether to save
     results of a time step.
-
-    Kept as a backward-compat wrapper around :class:`TimeOutputPlan`.
     """
-    plan = TimeOutputPlan(
-        save_times=options.get('save_times', 'all'),
-    )
-
     class IsSave(Struct):
+        def __init__(self, save_times):
+            if is_sequence(save_times):
+                save_times = nm.asarray(save_times)
+
+            self.save_times0 = save_times
+            self.reset()
+
         def reset(self, ts=None):
-            plan.reset(ts)
+            self.ilast = 0
+            self.save_times = self.save_times0
+            if ts is not None:
+                if isinstance(self.save_times0, int):
+                    self.save_times = nm.linspace(ts.t0, ts.t1,
+                                                  self.save_times0)
 
         def __call__(self, ts):
-            return plan.should_save_result(ts)
-
-    is_save = IsSave()
-    is_save.reset()
-
-    return is_save
-
-
-class OutputEvent(Struct):
-    """
-    Single time-step write decision bundle.
-
-    Attributes
-    ----------
-    step : int
-        The time step index (``ts.step``).
-    time : float
-        The current time (``ts.time``).
-    save_result : bool
-        Whether the result file should be written.
-    result_filename : str or None
-        The result filename, if ``save_result`` is True.
-    restart_filename : str or None
-        The restart filename, or None if restart saving is not configured.
-    restart_source : str or None
-        The filename of the most recent restart file that was loaded, or
-        None if no restart has happened.
-    is_final : bool
-        True if this event corresponds to the final time step.
-    """
-    _str_attrs = ('step', 'time', 'save_result', 'result_filename',
-                  'restart_filename', 'restart_source', 'is_final')
-
-
-class TimeOutputPlan:
-    """
-    Centralized plan for time-dependent output.
-
-    Wraps the save-times schedule, result/restart file naming, restart
-    metadata tracking, event history, and the save-times cursor so that
-    :meth:`Problem.save_state`, ``poststep_fun``, adaptive step
-    controllers, and restart load/save all operate on the same step/time
-    identifiers.
-
-    Parameters
-    ----------
-    save_times : 'all', int, sequence, or callable
-        Same semantics as the ``save_times`` problem option.
-    save_restart : int or None
-        Same semantics as the ``save_restart`` problem option.
-    output_dir : str
-        The output directory.
-    ofn_trunk : str
-        The output filename trunk (without format suffix).
-    output_format : str
-        The output format extension (``'vtk'``, ``'h5'``, etc.).
-    """
-
-    def __init__(self, save_times='all', save_restart=None,
-                 output_dir='.', ofn_trunk='result', output_format='vtk'):
-        self.save_times = save_times
-        self.save_restart = save_restart
-        self.output_dir = output_dir
-        self.ofn_trunk = ofn_trunk
-        self.output_format = output_format
-        self._ilast = 0
-        self._save_times_array = None
-        self._restart_filenames = []
-        self._step_events = []
-        self._restart_source = None
-        self._solver_is_stationary = False
-
-    # ------------------------------------------------------------------
-    # State / cursor management
-    # ------------------------------------------------------------------
-    def reset(self, ts=None):
-        """
-        Reset the plan cursor and event history.
-
-        Call before the first time step and after a restart load so that
-        save-times already written are skipped.
-
-        Note: ``restart_source`` is **not** cleared by ``reset()`` so that
-        it persists across the entire solve once set via
-        :meth:`record_load_restart`.
-        """
-        self._ilast = 0
-        self._restart_filenames = []
-        self._step_events = []
-        if ts is not None:
-            if isinstance(self.save_times, int):
-                self._save_times_array = nm.linspace(
-                    ts.t0, ts.t1, self.save_times)
-            elif is_sequence(self.save_times):
-                self._save_times_array = nm.asarray(self.save_times)
-            else:
-                self._save_times_array = self.save_times
-
-            if (isinstance(self._save_times_array, nm.ndarray)
-                and ts.step is not None and ts.step > 0):
-                tol = max(1e-14 * max(abs(ts.t1), 1.0), 1e-14)
-                self._ilast = int(nm.searchsorted(
-                    self._save_times_array, ts.time + tol, side='right'))
-                self._ilast = min(self._ilast, len(self._save_times_array))
-
-    def configure_solver(self, solver):
-        """
-        Record whether the solver is stationary so that the result
-        filename omits the step suffix for non-time-dependent solves.
-        """
-        self._solver_is_stationary = isinstance(solver, StationarySolver)
-
-    # ------------------------------------------------------------------
-    # Save decision (low-level)
-    # ------------------------------------------------------------------
-    def should_save_result(self, ts):
-        """
-        Return True if results should be saved at this time step.
-
-        .. note::
-
-          Calling this method advances the internal save-times cursor.
-          It should be invoked exactly once per time step.
-        """
-        if self.save_times == 'all':
-            return True
-
-        if isinstance(self._save_times_array, nm.ndarray):
-            tol = 1e-14 * max(ts.dt,
-                              1e-14 * max(abs(ts.t1), 1.0))
-            if (self._ilast < len(self._save_times_array)
-                and ts.time + tol >= self._save_times_array[self._ilast]):
-                self._ilast += 1
+            if isinstance(self.save_times, str) and self.save_times == 'all':
                 return True
 
-        elif callable(self.save_times):
-            return self.save_times(ts)
+            elif isinstance(self.save_times, nm.ndarray):
+                if (self.ilast < len(self.save_times)
+                    and (ts.time + (1e-14 * ts.dt)
+                         >= self.save_times[self.ilast])):
+                    self.ilast += 1
+                    return True
 
-        return False
+            elif callable(self.save_times):
+                return self.save_times(ts)
 
-    # ------------------------------------------------------------------
-    # Restart
-    # ------------------------------------------------------------------
-    def has_restart(self):
-        """Return True if restart saving is configured."""
-        return self.save_restart is not None
-
-    def record_load_restart(self, filename):
-        """Record the restart file that was loaded at startup."""
-        self._restart_source = filename
-
-    @property
-    def restart_source(self):
-        """Return the filename used for the most recent restart load."""
-        return self._restart_source
-
-    def get_restart_filename(self, ts=None):
-        """
-        Return the restart filename, or ``None`` if restart is not
-        configured.
-
-        When *ts* is given the filename is grouped with the per-step
-        result file (``<trunk>.<step>.restart.h5``).  Otherwise it is
-        written alongside the main result file (``<trunk>.restart.h5``),
-        never colliding with it.
-        """
-        if not self.has_restart():
-            return None
-
-        if ts is not None:
-            step_suffix = ts.suffix % ts.step
-            base = op.join(self.output_dir, self.ofn_trunk)
-            base = '.'.join((base, step_suffix))
-            return base + '.restart.h5'
-        else:
-            base = op.join(self.output_dir, self.ofn_trunk)
-            return base + '.restart.h5'
-
-    def record_restart(self, filename):
-        """
-        Track restart filenames and clean up the previous one when
-        ``save_restart == -1``.
-        """
-        mode = self.save_restart
-        if mode == -1 and len(self._restart_filenames):
-            last = self._restart_filenames.pop()
-            if last != filename:
-                try:
-                    os.remove(last)
-                except OSError:
-                    pass
-        self._restart_filenames.append(filename)
-
-    @property
-    def restart_filenames(self):
-        """Return the list of restart filenames written so far."""
-        return list(self._restart_filenames)
-
-    # ------------------------------------------------------------------
-    # Event stream (high-level)
-    # ------------------------------------------------------------------
-    def get_result_filename(self, ts):
-        """
-        Return the result output filename for the current time step.
-
-        Parameters
-        ----------
-        ts : TimeStepper
-            The current time stepper (used for the step suffix).
-        """
-        if self._solver_is_stationary:
-            suffix = None
-        else:
-            suffix = ts.suffix % ts.step
-        return self._make_output_name(suffix=suffix)
-
-    def _build_event(self, ts, save_result):
-        """
-        Build an :class:`OutputEvent` without advancing the save-times
-        cursor or recording the event.
-
-        This is the low-level builder used by both :meth:`propose_event`
-        and :meth:`get_event`.
-        """
-        result_filename = (self.get_result_filename(ts)
-                           if save_result else None)
-        restart_filename = self.get_restart_filename(ts)
-        is_final = (ts.nt is not None) and (ts.nt >= 1.0 - 1e-14)
-
-        return OutputEvent(
-            step=ts.step, time=ts.time,
-            save_result=save_result,
-            result_filename=result_filename,
-            restart_filename=restart_filename,
-            restart_source=self._restart_source,
-            is_final=is_final,
-        )
-
-    def propose_event(self, ts, save_results=True):
-        """
-        Propose an :class:`OutputEvent` for the current time step without
-        advancing the save-times cursor or recording the event.
-
-        This is used in adaptive time-stepping solvers where the step may
-        be rejected after the event is proposed.  If the step is accepted,
-        call :meth:`commit_event` to advance the cursor and record the
-        event.
-
-        Parameters
-        ----------
-        ts : TimeStepper
-            The current time stepper.
-        save_results : bool
-            If False, the returned event is forced to have
-            ``save_result=False``.
-
-        Returns
-        -------
-        event : OutputEvent
-            The proposed event (not yet committed).
-        """
-        if save_results:
-            # Peek at the save decision without advancing the cursor.
-            save_result = self._peek_save_result(ts)
-        else:
-            save_result = False
-
-        return self._build_event(ts, save_result)
-
-    def commit_event(self, event):
-        """
-        Commit a previously proposed event: advance the save-times cursor
-        (if the event has ``save_result=True``) and record the event in
-        the step history.
-
-        Parameters
-        ----------
-        event : OutputEvent
-            The event to commit, as returned by :meth:`propose_event`.
-        """
-        if event.save_result:
-            self._advance_cursor(event.time)
-        self._step_events.append(event)
-
-    def get_event(self, ts, save_results=True):
-        """
-        Build and commit an :class:`OutputEvent` for the current time step.
-
-        This is equivalent to :meth:`propose_event` + :meth:`commit_event`
-        and is the convenient path for non-adaptive solvers where every
-        step is accepted.
-
-        Calling this method advances the save-times cursor.  It must be
-        invoked exactly once per accepted time step.
-
-        Parameters
-        ----------
-        ts : TimeStepper
-            The current time stepper.
-        save_results : bool
-            If False, the returned event is forced to have
-            ``save_result=False``.  This allows the caller to globally
-            disable output while still recording the event.
-        """
-        if save_results:
-            save_result = self.should_save_result(ts)
-        else:
-            save_result = False
-
-        event = self._build_event(ts, save_result)
-        self._step_events.append(event)
-        return event
-
-    # ------------------------------------------------------------------
-    # Save-times cursor (internal)
-    # ------------------------------------------------------------------
-    def _peek_save_result(self, ts):
-        """
-        Check whether the current step should be saved, without advancing
-        the cursor.  Used by :meth:`propose_event`.
-        """
-        if self.save_times == 'all':
-            return True
-
-        if isinstance(self._save_times_array, nm.ndarray):
-            if self._ilast < len(self._save_times_array):
-                tol = 1e-14 * max(ts.dt,
-                                  1e-14 * max(abs(ts.t1), 1.0))
-                return ts.time + tol >= self._save_times_array[self._ilast]
             return False
 
-        elif callable(self.save_times):
-            return self.save_times(ts)
+    save_times = options.get('save_times', 'all')
+    is_save = IsSave(save_times)
 
-        return False
-
-    def _advance_cursor(self, time):
-        """
-        Advance the save-times cursor past the given time.  Used by
-        :meth:`commit_event` to sync the cursor with an accepted step.
-        """
-        if isinstance(self._save_times_array, nm.ndarray):
-            # Advance past all save times <= time.
-            tol = 1e-14 * max(abs(time), 1.0)
-            while (self._ilast < len(self._save_times_array)
-                   and time + tol >= self._save_times_array[self._ilast]):
-                self._ilast += 1
-
-    @property
-    def step_events(self):
-        """
-        Return the list of :class:`OutputEvent` instances recorded so
-        far, one per time step.
-        """
-        return list(self._step_events)
-
-    # ------------------------------------------------------------------
-    # Filename utilities
-    # ------------------------------------------------------------------
-    def _make_output_name(self, suffix=None):
-        out = op.join(self.output_dir, self.ofn_trunk)
-        if suffix is not None:
-            out = '.'.join((out, suffix))
-        return '.'.join((out, self.output_format))
+    return is_save
 
 def prepare_matrix(problem, state):
     """
@@ -637,9 +298,6 @@ class Problem(Struct):
         self.ts = self.get_default_ts()
         self.clear_equations()
 
-        if hasattr(self, 'output_plan'):
-            self.output_plan.reset()
-
         self._restart_filenames = []
 
     def setup_hooks(self, options=None):
@@ -788,14 +446,6 @@ class Problem(Struct):
         if ((self.output_format == 'h5') and
             (self.linearization.kind == 'adaptive')):
             self.linearization.kind = None
-
-        self.output_plan = TimeOutputPlan(
-            save_times=self.conf.options.get('save_times', 'all'),
-            save_restart=self.conf.options.get('save_restart', None),
-            output_dir=self.output_dir,
-            ofn_trunk=self.ofn_trunk,
-            output_format=self.output_format,
-        )
 
     def set_output_dir(self, output_dir=None):
         """
@@ -1188,16 +838,12 @@ class Problem(Struct):
 
         return meshes
 
-    def save_state(self, filename=None, state=None, out=None,
+    def save_state(self, filename, state=None, out=None,
                    fill_value=None, post_process_hook=None,
-                   linearization=None, split_results_by=None,
-                   event=None, **kwargs):
+                   linearization=None, split_results_by=None, **kwargs):
         """
         Parameters
         ----------
-        filename : str or None
-            The output file name.  If None, the filename is taken from
-            *event* (see below).
         split_results_by : None, 'region', 'variable'
             If 'region' or 'variable', data of each region/variable are
             stored in a separate file.
@@ -1206,19 +852,7 @@ class Problem(Struct):
             The linearization configuration for higher order
             approximations. If its kind is 'adaptive', `split_results_by` is
             assumed 'variable'.
-        event : OutputEvent or None
-            If provided, ``filename`` is taken from ``event.result_filename``.
-            This is the canonical path: ``poststep_fun`` builds an event via
-            :meth:`TimeOutputPlan.get_event` and passes it here so that the
-            filename and step identity always agree with the plan.
         """
-        if event is not None:
-            if event.result_filename is not None:
-                filename = event.result_filename
-
-        if filename is None:
-            raise ValueError('filename is required (pass explicitly or '
-                             'via event=)')
         linearization = get_default(linearization, self.linearization)
         if linearization.kind != 'adaptive':
             split_results_by = get_default(split_results_by,
@@ -1632,9 +1266,6 @@ class Problem(Struct):
         else:
             self.solver = solver.copy()
 
-        if hasattr(self, 'output_plan'):
-            self.output_plan.configure_solver(self.solver)
-
         self.ts = self.solver.ts
         self.status = get_default(solver.status, IndexedStruct())
 
@@ -1668,11 +1299,6 @@ class Problem(Struct):
         Get the problem-dependent functions required by the time-stepping
         solver during the solution process.
 
-        All save decisions and filenames are produced by a single call to
-        :meth:`TimeOutputPlan.get_event` in ``poststep_fun`` so that the
-        time step solver, output hooks, and restart load/save operate on
-        the same step/time identifiers and never duplicate or skip saves.
-
         Parameters
         ----------
         update_bcs : bool, optional
@@ -1699,22 +1325,20 @@ class Problem(Struct):
         poststep_fun : callable
             The function called at the end of each time step.
         """
+        is_save = make_is_save(self.conf.options)
+
         def init_fun(ts, vec0):
             if not ts.is_quasistatic:
                 self.init_time(ts)
 
+            is_save.reset(ts)
+
             restart_filename = self.conf.options.get('load_restart', None)
             if restart_filename is not None:
-                self.output_plan.record_load_restart(restart_filename)
                 variables = self.load_restart(restart_filename, ts=ts)
                 self.advance(ts)
                 ts.advance()
                 vec0 = variables.get_state(self.active_only)
-
-            # Reset the plan so that the save-times cursor is positioned
-            # after the restart time (ts now points to the next step to
-            # compute).  restart_source is preserved across the reset.
-            self.output_plan.reset(ts)
 
             return vec0
 
@@ -1738,21 +1362,21 @@ class Problem(Struct):
             if step_hook is not None:
                 step_hook(self, ts, variables)
 
-            # Single source of truth for this step: the plan decides
-            # everything in one call.  The event captures step, time,
-            # result/restart filenames, restart_source, and the final-step
-            # flag.  save_state and save_restart consume the event
-            # directly and cannot introduce their own filename logic.
-            event = self.output_plan.get_event(ts, save_results=save_results)
+            restart_filename = self.get_restart_filename(ts=ts)
+            if restart_filename is not None:
+                self.save_restart(restart_filename, ts=ts)
 
-            if event.restart_filename is not None:
-                self.save_restart(event=event, ts=ts)
+            if save_results and is_save(ts):
+                if not isinstance(self.get_solver(), StationarySolver):
+                    suffix = ts.suffix % ts.step
 
-            if event.save_result:
-                self.save_state(state=variables,
+                else:
+                    suffix = None
+
+                filename = self.get_output_name(suffix=suffix)
+                self.save_state(filename, variables,
                                 post_process_hook=post_process_hook,
                                 split_results_by=None,
-                                event=event,
                                 ts=ts,
                                 file_format=self.file_format)
 
@@ -2428,59 +2052,35 @@ class Problem(Struct):
         """
         If restarts are allowed in problem definition options, return the
         restart file name, based on the output directory and time step.
-
-        Delegates to :meth:`TimeOutputPlan.get_restart_filename` so that
-        the naming is consistent with the per-step result files.
         """
-        if hasattr(self, 'output_plan'):
-            return self.output_plan.get_restart_filename(ts)
-
-        # Legacy fallback (should not happen in normal usage).
         if self.conf.options.get('save_restart', None) is None:
             return
 
         suffix = 'restart'
         if ts is not None:
-            step_suffix = ts.suffix % ts.step
-            trunk_with_suffix = self.get_output_name(suffix=step_suffix)
-            base = trunk_with_suffix.rsplit('.', 1)[0]
-            restart_filename = base + '.' + suffix + '.h5'
+            suffix += '-' + ts.suffix % ts.step
 
-        else:
-            base = op.join(self.output_dir, self.ofn_trunk)
-            restart_filename = base + '.' + suffix + '.h5'
+        aux = self.get_output_name(extra=suffix)
+        iext = len(aux) - len('.' + self.output_format)
+        restart_filename = aux[:iext] + '.h5'
 
         return restart_filename
 
-    def save_restart(self, filename=None, ts=None, event=None):
+    def save_restart(self, filename, ts=None):
         """
         Save the current state and time step to a restart file.
 
         Parameters
         ----------
-        filename : str or None
-            The restart file name.  If None, the filename is taken from
-            *event* (see below).
+        filename : str
+            The restart file name.
         ts : TimeStepper instance, optional
             The time stepper. If not given, a default one is created.
-        event : OutputEvent or None
-            If provided, ``filename`` is taken from ``event.restart_filename``.
-            This is the canonical path: ``poststep_fun`` builds an event via
-            :meth:`TimeOutputPlan.get_event` and passes it here so that the
-            filename and step identity always agree with the plan.
 
         Notes
         -----
         Does not support terms with internal state.
         """
-        if event is not None:
-            if event.restart_filename is not None:
-                filename = event.restart_filename
-
-        if filename is None:
-            raise ValueError('filename is required (pass explicitly or '
-                             'via event=)')
-
         import tables as pt
 
         if ts is None:
@@ -2509,21 +2109,18 @@ class Problem(Struct):
 
         fd.close()
 
-        if hasattr(self, 'output_plan'):
-            self.output_plan.record_restart(filename)
-        else:
-            mode = self.conf.options.get('save_restart', None)
+        mode = self.conf.options.get('save_restart', None)
 
-            if (mode == -1) and len(self._restart_filenames):
-                last_filename = self._restart_filenames.pop()
-                if last_filename != filename:
-                    try:
-                        os.remove(last_filename)
+        if (mode == -1) and len(self._restart_filenames):
+            last_filename = self._restart_filenames.pop()
+            if last_filename != filename:
+                try:
+                    os.remove(last_filename)
 
-                    except OSError:
-                        pass
+                except OSError:
+                    pass
 
-            self._restart_filenames.append(filename)
+        self._restart_filenames.append(filename)
 
     def load_restart(self, filename, ts=None):
         """
