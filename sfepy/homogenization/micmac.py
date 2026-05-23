@@ -14,37 +14,7 @@ import os.path as op
 def get_homog_coefs_linear(ts, coor, mode,
                            micro_filename=None, regenerate=False,
                            coefs_filename=None, define_args=None,
-                           output_dir=None, problem=None):
-    """
-    Compute homogenized coefficients for linear problems.
-
-    Parameters
-    ----------
-    ts : TimeStepper
-        The time stepper.
-    coor : array
-        The coordinates where the coefficients are evaluated.
-    mode : str
-        The evaluation mode.
-    micro_filename : str
-        The micro problem filename.
-    regenerate : bool
-        If True, regenerate the coefficients even if the file exists.
-    coefs_filename : str
-        The coefficients filename.
-    define_args : dict
-        The define arguments for the micro problem.
-    output_dir : str
-        The output directory.
-    problem : Problem or None
-        The macroscopic problem.  The ``CoefficientContext`` produced by
-        :class:`HomogenizationEngine` is stored on
-        ``problem._homog_context`` so that downstream consumers (e.g.
-        recovery hooks) can pass the same context downstream and
-        guarantee consistent cache keys / file tags across save_names,
-        coefs HDF5 and recovery outputs.
-    """
-    from sfepy.homogenization.coefs_base import CoefficientContext
+                           output_dir=None):
 
     oprefix = output.prefix
     output.prefix = 'micro:'
@@ -77,25 +47,9 @@ def get_homog_coefs_linear(ts, coor, mode,
         if type(coefs) is tuple:
             coefs = coefs[0]
 
-        # Store the unified context on the macroscopic problem so that
-        # recovery hooks and other downstream consumers can use it.
-        if problem is not None and app.context is not None:
-            problem._homog_context = app.context
-
         coefs.to_file_hdf5( coefs_filename )
     else:
         coefs = Coefficients.from_file_hdf5( coefs_filename )
-
-        # Reconstruct the context from the HDF5 metadata so that
-        # downstream consumers can use it even when coefficients were
-        # loaded from disk.
-        if problem is not None:
-            ctx = CoefficientContext()
-            if hasattr(coefs, 'cache_context') \
-                    and isinstance(coefs.cache_context, dict):
-                for k, v in coefs.cache_context.items():
-                    setattr(ctx, k, v)
-            problem._homog_context = ctx
 
     out = {}
     if mode == None:
@@ -168,11 +122,6 @@ def get_homog_coefs_nonlinear(ts, coor, mode, macro_data=None,
 
     if type(coefs) is tuple:
         coefs = coefs[0]
-
-    # Store the unified context on the macroscopic problem so that
-    # recovery hooks and other downstream consumers can use it.
-    if app.context is not None:
-        problem._homog_context = app.context
 
     out = {}
     for key, val in coefs.__dict__.items():

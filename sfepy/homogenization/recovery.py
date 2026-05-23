@@ -11,7 +11,6 @@ from sfepy.base.conf import get_standard_keywords
 from sfepy.discrete import Problem, Region
 from sfepy.base.conf import ProblemConf
 from sfepy.homogenization.coefficients import Coefficients
-from sfepy.homogenization.coefs_base import CoefficientContext
 from sfepy.homogenization.micmac import get_correctors_from_file_hdf5
 import os.path as op
 import atexit
@@ -524,9 +523,8 @@ def get_recovery_points(region, eps0):
 
 def recover_micro_hook(micro_filename, region, macro, eps0,
                        region_mode='el_centers', eval_mode='constant',
-                       eval_vars=None, corrs=None,
-                       define_args=None, output_dir=None, verbose=False,
-                       context=None):
+                       eval_vars=None, corrs=None, recovery_file_tag='',
+                       define_args=None, output_dir=None, verbose=False):
     """
     Parameters
     ----------
@@ -556,31 +554,18 @@ def recover_micro_hook(micro_filename, region, macro, eps0,
         The list of variables use to evaluate the macroscopic fields.
     corrs : dict of CorrSolution
         The correctors for recovery.
+    recovery_file_tag : str
+        The tag which is appended to the output file.
     define_args : dict
         The define arguments for the microscopic problem.
     output_dir : str
         The output directory.
     verbose : bool
         The verbose terminal output.
-    context : CoefficientContext
-        The unified context produced by :class:`HomogenizationEngine`.
-        Its :meth:`get_cache_key` is used as the recovery cache key and its
-        :meth:`get_file_tag` is used for output file names, guaranteeing
-        consistency with the engine's save_names and coefs HDF5 metadata.
-        Must be provided.
     """
-    if context is None:
-        raise ValueError(
-            'CoefficientContext must be passed to recover_micro_hook() '
-            'so that the recovery cache key and output file tag are '
-            'identical to the engine\'s save_names and coefs HDF5.')
-
     import sfepy.base.multiproc_proc as multi
 
-    ctx_key = context.get_cache_key()
-    cache_entry = _recovery_global_dict.get(ctx_key)
-
-    if cache_entry is None:
+    if 'micro_problem' not in _recovery_global_dict:
         # Create a micro-problem instance.
         required, other = get_standard_keywords()
         required.remove('equations')
@@ -606,10 +591,9 @@ def recover_micro_hook(micro_filename, region, macro, eps0,
             pb = Problem.from_conf(conf, init_equations=False,
                                    init_solvers=False)
 
-        cache_entry = (pb, corrs, recovery_hook)
-        _recovery_global_dict[ctx_key] = cache_entry
-
-    pb, corrs, recovery_hook = cache_entry
+        _recovery_global_dict['micro_problem'] = pb, corrs, recovery_hook
+    else:
+        pb, corrs, recovery_hook = _recovery_global_dict['micro_problem']
 
     is_multiproc = pb.conf.options.get('multiprocessing', True)\
         and multi.use_multiprocessing
@@ -779,8 +763,7 @@ def recover_micro_hook(micro_filename, region, macro, eps0,
                                         mode='cell',
                                         data=rec_ids[gcidxs, ...])
             micro_name = pb.get_output_name(extra='recovered_%s%s'
-                                            % (rlabel,
-                                               context.get_file_tag()))
+                                            % (rlabel, recovery_file_tag))
             filename = op.join(output_dir, op.basename(micro_name))
             mesh_out = Mesh.from_data('recovery_%s' % rlabel, rcoors,
                                       ngroups[vidxs], [rconn],

@@ -211,6 +211,23 @@ class Problem(Struct):
                 msh.set_accuracy(conf.options.mesh_eps)
                 per.set_accuracy(conf.options.mesh_eps)
 
+            use_manifest = conf.options.get('use_mesh_manifest', True)
+            manifest_report = {
+                'manifest_present': False,
+                'manifest_file': None,
+                'added_regions': [],
+                'added_materials': [],
+                'skipped_regions': [],
+                'skipped_materials': [],
+                'enabled': use_manifest,
+            }
+            if use_manifest:
+                report = conf.apply_manifest(mesh, verbose=False)
+                manifest_report.update(report)
+            else:
+                output('mesh manifest injection disabled '
+                       '(use_mesh_manifest=False)')
+
         elif conf.get('filename_domain') is not None:
             from sfepy.discrete.iga.domain import IGDomain
             domain = IGDomain.from_file(conf.filename_domain)
@@ -222,6 +239,9 @@ class Problem(Struct):
         obj = Problem('problem_from_conf', conf=conf, functions=functions,
                       domain=domain, auto_conf=False,
                       active_only=active_only)
+
+        if 'manifest_report' in dir():
+            obj.manifest_report = manifest_report
 
         allow_empty = conf.options.get('allow_empty_regions', False)
         obj.set_regions(conf.regions, obj.functions,
@@ -237,6 +257,8 @@ class Problem(Struct):
 
         if init_solvers:
             obj.set_conf_solvers(conf.solvers, conf.options)
+
+        obj.print_manifest_summary()
 
         return obj
 
@@ -383,6 +405,80 @@ class Problem(Struct):
         subpb.set_ics(self.ics)
 
         return subpb
+
+    def get_manifest_summary(self):
+        """Return a human-readable summary of the mesh manifest injection.
+
+        This describes whether a sidecar manifest was found, which regions
+        and materials were injected from it, and which names were
+        skipped because they collided with existing definitions.
+
+        Returns
+        -------
+        summary : str
+            A multi-line string suitable for logging or printing.
+        """
+        report = getattr(self, 'manifest_report', None)
+        if report is None:
+            return 'manifest: not processed (no filename_mesh in conf)'
+
+        lines = []
+        lines.append('mesh manifest:')
+
+        if not report.get('enabled', True):
+            lines.append('  injection disabled (use_mesh_manifest=False)')
+            return '\n'.join(lines)
+
+        if not report.get('manifest_present', False):
+            lines.append('  no sidecar manifest found')
+            return '\n'.join(lines)
+
+        mf = report.get('manifest_file')
+        if mf:
+            lines.append('  source file: %s' % mf)
+
+        manifest = getattr(self.domain.mesh, 'region_material_manifest', None)
+        if manifest is not None:
+            if manifest.get('source_mesh'):
+                lines.append('  source mesh: %s' % manifest['source_mesh'])
+            if manifest.get('source_command'):
+                lines.append('  generated via: %s'
+                             % manifest['source_command'])
+            if manifest.get('generated_at'):
+                lines.append('  generated at: %s'
+                             % manifest['generated_at'])
+            lines.append('  manifest version: %s'
+                         % manifest.get('version', 1))
+
+        added_r = report.get('added_regions', [])
+        added_m = report.get('added_materials', [])
+        skipped_r = report.get('skipped_regions', [])
+        skipped_m = report.get('skipped_materials', [])
+
+        if added_r:
+            lines.append('  regions injected (%d): %s'
+                         % (len(added_r), ', '.join(added_r)))
+        else:
+            lines.append('  regions injected: none')
+
+        if added_m:
+            lines.append('  materials injected (%d): %s'
+                         % (len(added_m), ', '.join(added_m)))
+        else:
+            lines.append('  materials injected: none')
+
+        if skipped_r:
+            lines.append('  regions skipped (name conflict, %d): %s'
+                         % (len(skipped_r), ', '.join(skipped_r)))
+        if skipped_m:
+            lines.append('  materials skipped (name conflict, %d): %s'
+                         % (len(skipped_m), ', '.join(skipped_m)))
+
+        return '\n'.join(lines)
+
+    def print_manifest_summary(self):
+        """Print the mesh manifest injection summary via ``output()``."""
+        output(self.get_manifest_summary())
 
     def setup_default_output(self, conf=None, options=None):
         """

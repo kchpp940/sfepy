@@ -13,12 +13,10 @@ import sfepy.linalg as la
 
 
 def recovery_hook(pb, ncoors, region, ts,
-                  naming_scheme='step_iel', context=None):
+                  naming_scheme='step_iel', recovery_file_tag=''):
     from sfepy.base.ioutils import get_print_info
     from sfepy.homogenization.recovery import get_output_suffix
     import os.path as op
-
-    file_tag = context.get_file_tag() if context is not None else ''
 
     for ii, icell in enumerate(region.cells):
         out = {}
@@ -51,7 +49,7 @@ def recovery_hook(pb, ncoors, region, ts,
                                    pb.output_format)
 
         micro_name = pb.get_output_name(extra='recovered_'
-                                        + file_tag + suffix)
+                                        + recovery_file_tag + suffix)
         filename = op.join(output_dir, op.basename(micro_name))
         fpv = pb.conf.options.get('split_results_by', None)
         pb.save_state(filename, out=out, split_results_by=fpv)

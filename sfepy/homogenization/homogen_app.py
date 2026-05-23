@@ -264,18 +264,10 @@ class HomogenizationApp(HomogenizationEngine):
                     ms_cache[key] = self.micro_states[k][ii]
 
             coef_save_name = op.join(opts.output_dir, opts.coefs_filename)
-            context = getattr(self.he, 'context', None)
-            file_tag = context.get_file_tag() if context is not None else ''
-            coefs.to_file_hdf5(coef_save_name + '%s.h5' % file_tag,
-                               context=context)
-            coefs.to_file_txt(coef_save_name + '%s.txt' % file_tag,
+            coefs.to_file_hdf5(coef_save_name + '%s.h5' % time_tag)
+            coefs.to_file_txt(coef_save_name + '%s.txt' % time_tag,
                               opts.tex_names,
                               opts.float_format)
-
-        # Expose the unified context so callers (e.g. recovery hooks) can
-        # pass it downstream and guarantee consistent cache keys / file
-        # tags across save_names, coefs HDF5 and recovery outputs.
-        self.context = getattr(self.he, 'context', None)
 
         if ret_all:
             return coefs, dependencies

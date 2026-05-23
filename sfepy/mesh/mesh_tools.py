@@ -1,3 +1,6 @@
+import json
+import os.path as op
+from datetime import datetime, timezone
 import numpy as nm
 import scipy.sparse as sps
 from scipy.sparse.csgraph import connected_components
@@ -9,6 +12,343 @@ from sfepy.base.base import output
 from sfepy.discrete.equations import create_dof_graph
 from sfepy.discrete.fem import Mesh, FEDomain
 from sfepy.discrete.fem.utils import prepare_translate
+
+
+def default_manifest_name(filename):
+    """Return the companion manifest file name for a mesh file."""
+    base, _ = op.splitext(filename)
+    return base + '.manifest.json'
+
+
+def _default_region_name(cell_group):
+    return 'cells_%d' % int(cell_group)
+
+
+def _default_material_name(cell_group):
+    return 'mat_%d' % int(cell_group)
+
+
+def build_manifest(mesh, cell_group_names=None, vertex_group_names=None,
+                   include_defaults=True, source_mesh=None,
+                   source_command=None):
+    """Build a region/material mapping manifest for a mesh.
+
+    Parameters
+    ----------
+    mesh : Mesh
+        The mesh whose ``cell_groups`` / ``vertex_groups`` will be inspected.
+    cell_group_names : dict, optional
+        Mapping ``cell_group_id -> region_name`` used to populate the
+        ``regions`` and ``materials`` sections.
+    vertex_group_names : dict, optional
+        Mapping ``vertex_group_id -> name`` used to populate the
+        ``vertex_groups`` section.
+    include_defaults : bool
+        If True, fall back to default names for any group without an explicit
+        mapping.
+    source_mesh : str, optional
+        Path of the source mesh file (e.g. the input to ``convert_mesh``) so
+        the manifest records its provenance.
+    source_command : str, optional
+        Free-form string describing the command / pipeline that generated the
+        manifest (e.g. ``'convert_mesh --remap-cell-groups'``).
+
+    Returns
+    -------
+    manifest : dict
+        A JSON-serialisable dictionary with ``regions``, ``materials`` and
+        ``vertex_groups`` entries.
+    """
+    cell_group_names = cell_group_names or {}
+    vertex_group_names = vertex_group_names or {}
+
+    cell_groups = nm.unique(mesh.cmesh.cell_groups)
+    vertex_groups = nm.unique(mesh.cmesh.vertex_groups)
+
+    regions = {}
+    materials = {}
+    for cg in cell_groups:
+        cgi = int(cg)
+        rname = cell_group_names.get(cgi)
+        if rname is None and include_defaults:
+            rname = _default_region_name(cgi)
+        if rname is None:
+            continue
+        regions[rname] = {
+            'kind': 'cells_by_mat_id',
+            'mat_id': cgi,
+        }
+        mname = cell_group_names.get(cgi,
+                                     _default_material_name(cgi)
+                                     if include_defaults else None)
+        if mname is not None:
+            materials[mname] = {'mat_id': cgi, 'region': rname}
+
+    vgroups = {}
+    for vg in vertex_groups:
+        vgi = int(vg)
+        vname = vertex_group_names.get(vgi)
+        if vname is None and include_defaults:
+            vname = 'vertices_%d' % vgi
+        if vname is None:
+            continue
+        vgroups[vname] = {'vertex_group': vgi}
+
+    manifest = {
+        'version': 1,
+        'mesh': mesh.name,
+        'generated_at': datetime.now(timezone.utc).isoformat(),
+        'regions': regions,
+        'materials': materials,
+        'vertex_groups': vgroups,
+    }
+    if source_mesh is not None:
+        manifest['source_mesh'] = source_mesh
+    if source_command is not None:
+        manifest['source_command'] = source_command
+    return manifest
+
+
+def write_manifest(manifest, filename):
+    """Write a region/material mapping manifest to a JSON file."""
+    with open(filename, 'w') as fid:
+        json.dump(manifest, fid, indent=2, sort_keys=True)
+    output('wrote manifest: %s' % filename)
+
+
+def read_manifest(filename):
+    """Read a region/material mapping manifest from a JSON file.
+
+    Returns ``None`` if the file does not exist.
+    """
+    if not op.isfile(filename):
+        return None
+    with open(filename, 'r') as fid:
+        return json.load(fid)
+
+
+def write_mesh_manifest(mesh, filename, cell_group_names=None,
+                        vertex_group_names=None, include_defaults=True,
+                        source_mesh=None, source_command=None):
+    """Build and write the companion manifest for `mesh` next to `filename`."""
+    manifest = build_manifest(mesh,
+                              cell_group_names=cell_group_names,
+                              vertex_group_names=vertex_group_names,
+                              include_defaults=include_defaults,
+                              source_mesh=source_mesh,
+                              source_command=source_command)
+    write_manifest(manifest, default_manifest_name(filename))
+    return manifest
+
+
+def attach_manifest(mesh, filename=None, manifest=None):
+    """Attach a region/material manifest to a Mesh instance.
+
+    The manifest is read from ``filename`` (or its companion
+    ``*.manifest.json``) if ``manifest`` is None.  The mesh gains a
+    ``region_material_manifest`` attribute as well as convenience helpers
+    ``get_region_names`` and ``get_material_names``.
+    """
+    manifest_file = None
+    if manifest is None and filename is not None:
+        manifest_file = default_manifest_name(filename)
+        manifest = read_manifest(manifest_file)
+    if manifest is None:
+        manifest = build_manifest(mesh, include_defaults=True)
+
+    mesh.region_material_manifest = manifest
+    mesh._manifest_file = manifest_file
+
+    def get_region_names():
+        return list(manifest.get('regions', {}).keys())
+
+    def get_material_names():
+        return list(manifest.get('materials', {}).keys())
+
+    def get_vertex_group_names():
+        return list(manifest.get('vertex_groups', {}).keys())
+
+    mesh.get_region_names = get_region_names
+    mesh.get_material_names = get_material_names
+    mesh.get_vertex_group_names = get_vertex_group_names
+    return manifest
+
+
+def manifest_to_conf(manifest, existing_regions=None, existing_materials=None):
+    """Convert a sidecar manifest to SfePy region/material configuration.
+
+    The returned dictionaries are in the *post-transform* format used by
+    ``ProblemConf`` — i.e. values are ``Struct`` instances suitable for
+    direct insertion into ``conf.regions`` / ``conf.materials``.
+
+    Parameters
+    ----------
+    manifest : dict
+        The manifest dictionary as returned by :func:`read_manifest` or
+        :func:`build_manifest`.
+    existing_regions : dict, optional
+        Existing ``conf.regions`` dict.  Region names that already appear
+        in this dict (matched by ``Struct.name``) are **not** overwritten.
+    existing_materials : dict, optional
+        Existing ``conf.materials`` dict.  Material names that already
+        appear in this dict are not overwritten.
+
+    Returns
+    -------
+    region_entries : dict
+        New region entries keyed by ``'region_<name>'``.
+    material_entries : dict
+        New material entries keyed by ``'material_<name>'``.
+    skipped_regions : list of str
+        Region names from the manifest that were skipped because they
+        collide with names already defined in ``existing_regions``.
+    skipped_materials : list of str
+        Material names from the manifest that were skipped because they
+        collide with names already defined in ``existing_materials``.
+    """
+    from sfepy.base.base import Struct
+
+    if existing_regions is None:
+        existing_regions = {}
+    if existing_materials is None:
+        existing_materials = {}
+
+    existing_region_names = set()
+    for v in existing_regions.values():
+        if hasattr(v, 'name'):
+            existing_region_names.add(v.name)
+
+    existing_material_names = set()
+    for v in existing_materials.values():
+        if hasattr(v, 'name'):
+            existing_material_names.add(v.name)
+
+    region_entries = {}
+    material_entries = {}
+    skipped_regions = []
+    skipped_materials = []
+
+    for rname, rdef in manifest.get('regions', {}).items():
+        if rname in existing_region_names:
+            skipped_regions.append(rname)
+            continue
+        mat_id = rdef.get('mat_id')
+        if mat_id is not None:
+            select = 'cells of group %d' % int(mat_id)
+        else:
+            select = 'all'
+        region_entries['region_' + rname] = Struct(
+            name=rname, select=select,
+        )
+
+    for mname, mdef in manifest.get('materials', {}).items():
+        if mname in existing_material_names:
+            skipped_materials.append(mname)
+            continue
+        rname = mdef.get('region', '')
+        material_entries['material_' + mname] = Struct(
+            name=mname, values={}, region=rname,
+        )
+
+    for vname, vdef in manifest.get('vertex_groups', {}).items():
+        if vname in existing_region_names:
+            skipped_regions.append(vname)
+            continue
+        vg = vdef.get('vertex_group', 0)
+        select = 'vertices of group %d' % int(vg)
+        region_entries['region_' + vname] = Struct(
+            name=vname, select=select, kind='facet',
+        )
+
+    return region_entries, material_entries, skipped_regions, skipped_materials
+
+
+def apply_manifest_to_conf(conf, mesh, verbose=True):
+    """Merge manifest-derived region/material entries into a ProblemConf.
+
+    This reads ``mesh.region_material_manifest`` and adds any region /
+    material definitions that are not already present in
+    ``conf.regions`` / ``conf.materials``.  The conf is modified in-place.
+
+    Parameters
+    ----------
+    conf : ProblemConf
+        The problem configuration to augment.
+    mesh : Mesh
+        The mesh whose manifest should be applied.
+    verbose : bool
+        If True, log warnings for skipped (conflicting) names and info
+        about missing / present manifests.
+
+    Returns
+    -------
+    report : dict
+        A dictionary with keys:
+
+        - ``'manifest_present'``: bool — whether a sidecar manifest was found.
+        - ``'manifest_file'``: str or None — path of the loaded manifest.
+        - ``'added_regions'``: list of str.
+        - ``'added_materials'``: list of str.
+        - ``'skipped_regions'``: list of str — names that conflicted with
+          existing region definitions.
+        - ``'skipped_materials'``: list of str — names that conflicted with
+          existing material definitions.
+    """
+    manifest = getattr(mesh, 'region_material_manifest', None)
+    manifest_file = getattr(mesh, '_manifest_file', None)
+
+    report = {
+        'manifest_present': manifest is not None,
+        'manifest_file': manifest_file,
+        'added_regions': [],
+        'added_materials': [],
+        'skipped_regions': [],
+        'skipped_materials': [],
+    }
+
+    if manifest is None:
+        if verbose:
+            output('no sidecar manifest found for mesh "%s"' % mesh.name)
+        return report
+
+    region_entries, material_entries, skipped_regions, skipped_materials \
+        = manifest_to_conf(
+            manifest,
+            existing_regions=conf.regions,
+            existing_materials=conf.materials,
+        )
+
+    report['skipped_regions'] = skipped_regions
+    report['skipped_materials'] = skipped_materials
+
+    if verbose and skipped_regions:
+        output('manifest region names skipped (already defined): %s'
+               % ', '.join(skipped_regions))
+    if verbose and skipped_materials:
+        output('manifest material names skipped (already defined): %s'
+               % ', '.join(skipped_materials))
+
+    if not hasattr(conf, 'regions') or conf.regions is None:
+        conf.regions = {}
+    if not hasattr(conf, 'materials') or conf.materials is None:
+        conf.materials = {}
+
+    added_regions = []
+    for key, val in region_entries.items():
+        if key not in conf.regions:
+            conf.regions[key] = val
+            added_regions.append(val.name)
+
+    added_materials = []
+    for key, val in material_entries.items():
+        if key not in conf.materials:
+            conf.materials[key] = val
+            added_materials.append(val.name)
+
+    report['added_regions'] = added_regions
+    report['added_materials'] = added_materials
+
+    return report
 
 def elems_q2t(el):
 

@@ -61,8 +61,7 @@ def post_process(out, pb, state, extend=False):
                         if key in happ.micro_state_cache:
                             rcoors.append(happ.micro_state_cache[key])
 
-                    recovery_hook(hpb, rcoors, pb.domain.regions[rname], pb.ts,
-                                  context=getattr(pb, '_homog_context', None))
+                    recovery_hook(hpb, rcoors, pb.domain.regions[rname], pb.ts)
 
     return out
 

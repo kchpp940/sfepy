@@ -37,11 +37,9 @@ def post_process(out, pb, state, extend=False):
             rstrain = pb.evaluate('ev_cauchy_strain.i.%s(u)' % rname,
                                   mode='el_avg')[:, 0, ...]
 
-            context = getattr(pb, '_homog_context', None)
             recover_micro_hook(pb.conf.options.micro_filename,
                                region, {'strain': rstrain}, 0.01,
-                               output_dir=pb.conf.options.output_dir,
-                               context=context)
+                               output_dir=pb.conf.options.output_dir)
 
     return out
 
@@ -56,8 +54,7 @@ def get_homog(ts, coors, mode=None,
 
     out = get_homog_coefs_linear(ts, coors, mode, regenerate=regenerate,
                                  micro_filename=options['micro_filename'],
-                                 output_dir=problem.conf.options.output_dir,
-                                 problem=problem)
+                                 output_dir=problem.conf.options.output_dir)
     regenerate = False
 
     return out

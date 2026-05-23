@@ -3,7 +3,7 @@ from copy import copy
 
 from sfepy.base.base import output, get_default, Struct
 from sfepy.applications import PDESolverApp, Application
-from .coefs_base import MiniAppBase, CoefEval, CoefficientContext
+from .coefs_base import MiniAppBase, CoefEval
 from .utils import rm_multi
 from sfepy.discrete.evaluate import eval_equations
 import sfepy.base.multiproc as multi
@@ -56,8 +56,7 @@ class CoefVolume(MiniAppBase):
 class HomogenizationWorker:
     def __call__(self, problem, options, post_process_hook,
                  req_info, coef_info,
-                 micro_states, store_micro_idxs, time_tag='',
-                 context=None):
+                 micro_states, store_micro_idxs, time_tag=''):
         """Calculate homogenized correctors and coefficients.
 
         Parameters
@@ -79,9 +78,6 @@ class HomogenizationWorker:
         time_tag : str
             The label corresponding to the actual time step and iteration,
             used in the corrector file names.
-        context : CoefficientContext or None
-            The unified context identifying material parameters, frequency,
-            region dependencies and output file names.
 
         Returns
         -------
@@ -102,7 +98,7 @@ class HomogenizationWorker:
             val = self.calculate_req(problem, options, post_process_hook,
                                      name, req_info, coef_info, save_names,
                                      dependencies, micro_states,
-                                     time_tag, context=context)
+                                     time_tag)
 
             dependencies[name] = val
             gc.collect()
@@ -131,45 +127,28 @@ class HomogenizationWorker:
 
     @staticmethod
     def calculate(mini_app, problem, dependencies, dep_requires,
-                  save_names, micro_states, chunk_tab, mode, proc_id,
-                  time_tag='', context=None):
-        """Evaluate a corrector or coefficient.
-
-        This method must not mutate `mini_app`, which may be shared between
-        invocations (e.g. when the same problem configuration is reused with
-        different material parameters, frequency points or regions).
-
-        The `context` (CoefficientContext) provides a unique cache key so
-        that save_names entries are not overwritten by different cell
-        problem configurations sharing the same mini_app name.
-        """
-        # Enrich the context with runtime values that may have changed
-        # since the context was first constructed (e.g. materials updated
-        # by a previous solver run, frequency/time-step changes).
-        if context is not None:
-            context.update_from_problem(problem)
-        ctx_key = context.get_cache_key() if context is not None else ''
-
+                  save_names, micro_states, chunk_tab, mode, proc_id):
         if micro_states is None:
             data = {key: dependencies[key] for key in dep_requires
                     if 'Volume_' not in key}
             volume = {key[9:]: dependencies[key]
                       for key in dep_requires if 'Volume_' in key}
+            mini_app.requires = [ii for ii in mini_app.requires
+                                 if 'c.Volume_' not in ii]
 
             if mode == 'coefs':
                 val = mini_app(volume, data=data)
             else:
-                base_name = mini_app.save_name
-                if base_name is not None:
-                    save_key = f'{ctx_key}|{mini_app.name}' if ctx_key \
-                        else mini_app.name
-                    save_names[save_key] = base_name
+                if mini_app.save_name is not None:
+                    save_names[mini_app.name] = mini_app.get_save_name_base()
                 val = mini_app(data=data)
         else:
             data = {rm_multi(key): dependencies[key]
                     for key in dep_requires if 'Volume_' not in key}
             volume = {rm_multi(key[9:]): dependencies[key]
                       for key in dep_requires if 'Volume_' in key}
+            mini_app.requires = [ii for ii in mini_app.requires
+                                 if 'c.Volume_' not in ii]
 
             if '|multiprocessing_' in mini_app.name\
                     and chunk_tab is not None:
@@ -183,10 +162,8 @@ class HomogenizationWorker:
                 local_state = micro_states
 
             val = []
-            store_idxs = getattr(mini_app, 'store_idxs', None)
-            base_name = mini_app.save_name
-            save_key = f'{ctx_key}|{mini_app.name}' if ctx_key \
-                else mini_app.name
+            if hasattr(mini_app, 'store_idxs') and mode == 'reqs':
+                save_name = mini_app.save_name
 
             local_coors = local_state['coors']
             for im in range(len(local_coors)):
@@ -200,25 +177,23 @@ class HomogenizationWorker:
                     val.append(mini_app(get_dict_idxval(volume, im),
                                         data=get_dict_idxval(data, im)))
                 else:
-                    if store_idxs is not None and im in store_idxs[0]:
-                        store_id = '_%04d' % (store_idxs[1] + im)
-                        if base_name is not None:
-                            out_name = base_name + store_id
-                            if save_key in save_names:
-                                save_names[save_key].append(out_name)
+                    if hasattr(mini_app, 'store_idxs')\
+                            and im in mini_app.store_idxs[0]:
+                        store_id = '_%04d'\
+                            % (mini_app.store_idxs[1] + im)
+                        if save_name is not None:
+                            mini_app.save_name = save_name + store_id
+                            key = mini_app.name
+                            if key in save_names:
+                                save_names[key].append(
+                                    mini_app.get_save_name_base())
                             else:
-                                save_names[save_key] = [out_name]
+                                save_names[key] =\
+                                    [mini_app.get_save_name_base()]
                     else:
-                        out_name = None
+                        mini_app.save_name = None
 
-                    # Temporarily set save_name locally so mini_app
-                    # saves the file under the per-iteration path.
-                    old_save_name = mini_app.save_name
-                    mini_app.save_name = out_name
-                    try:
-                        val.append(mini_app(data=get_dict_idxval(data, im)))
-                    finally:
-                        mini_app.save_name = old_save_name
+                    val.append(mini_app(data=get_dict_idxval(data, im)))
 
                     if len(val) == 1 and val[0].name == 'update_coors':
                         local_coors[im] += val[0].state
@@ -228,8 +203,7 @@ class HomogenizationWorker:
     @staticmethod
     def calculate_req(problem, opts, post_process_hook,
                       name, req_info, coef_info, save_names, dependencies,
-                      micro_states, time_tag='', chunk_tab=None, proc_id='0',
-                      context=None):
+                      micro_states, time_tag='', chunk_tab=None, proc_id='0'):
         """Calculate a requirement, i.e. correctors or coefficients.
 
         Parameters
@@ -261,8 +235,6 @@ class HomogenizationWorker:
         proc_id : int
             The id number of the processor (core) which is solving the actual
             chunk.
-        context : CoefficientContext or None
-            The unified context for cache key uniqueness.
 
         Returns
         -------
@@ -285,8 +257,7 @@ class HomogenizationWorker:
             val = HomogenizationWorker.calculate(mini_app, problem,
                                                  dependencies, dep_requires,
                                                  save_names, micro_states,
-                                                 chunk_tab, 'coefs', proc_id,
-                                                 context=context)
+                                                 chunk_tab, 'coefs', proc_id)
 
             output('...done')
 
@@ -300,8 +271,7 @@ class HomogenizationWorker:
                                   post_process_hook=post_process_hook,
                                   split_results_by=opts.split_results_by)
             if mini_app.save_name is not None:
-                if context is not None:
-                    mini_app.save_name += context.get_file_tag()
+                mini_app.save_name += time_tag
 
             problem.clear_equations()
 
@@ -311,8 +281,7 @@ class HomogenizationWorker:
             val = HomogenizationWorker.calculate(mini_app, problem,
                                                  dependencies, dep_requires,
                                                  save_names, micro_states,
-                                                 chunk_tab, 'reqs', proc_id,
-                                                 context=context)
+                                                 chunk_tab, 'reqs', proc_id)
 
             output('...done')
 
@@ -326,7 +295,7 @@ class HomogenizationWorkerMulti(HomogenizationWorker):
     def __call__(self, problem, options, post_process_hook,
                  req_info, coef_info,
                  micro_states, store_micro_idxs, chunks_per_worker,
-                 time_tag='', context=None):
+                 time_tag=''):
         """Calculate homogenized correctors and coefficients.
 
         Parameters
@@ -334,8 +303,6 @@ class HomogenizationWorkerMulti(HomogenizationWorker):
         The same parameters as :class:`HomogenizationWorker`, extended by:
         chunks_per_worker : int
             The number of chunks per one worker.
-        context : CoefficientContext or None
-            The unified context for cache key uniqueness.
 
         Returns
         -------
@@ -388,7 +355,7 @@ class HomogenizationWorkerMulti(HomogenizationWorker):
             args = (tasks, lock, remaining, numdeps, inverse_deps,
                     problem, options, post_process_hook, req_info,
                     coef_info, save_names, dependencies, micro_states,
-                    time_tag, micro_chunk_tab, str(ii + 1), context)
+                    time_tag, micro_chunk_tab, str(ii + 1))
             w = multiproc.Process(target=self.calculate_req_multi,
                                   args=args)
             w.start()
@@ -408,8 +375,7 @@ class HomogenizationWorkerMulti(HomogenizationWorker):
     def calculate_req_multi(tasks, lock, remaining, numdeps, inverse_deps,
                             problem, opts, post_process_hook,
                             req_info, coef_info, save_names, dependencies,
-                            micro_states, time_tag, chunk_tab, proc_id,
-                            context=None):
+                            micro_states, time_tag, chunk_tab, proc_id):
         """Calculate a requirement in parallel.
 
         Parameters
@@ -426,8 +392,6 @@ class HomogenizationWorkerMulti(HomogenizationWorker):
         inverse_deps : dict
             The inverse dependencies - which requirements depend
             on a given one.
-        context : CoefficientContext or None
-            The unified context for cache key uniqueness.
 
         For the definition of other parameters see 'calculate_req'.
         """
@@ -438,11 +402,9 @@ class HomogenizationWorkerMulti(HomogenizationWorker):
                 continue
 
             save_names_loc = {}
-            val = HomogenizationWorker.calculate_req(
-                problem, opts,
+            val = HomogenizationWorker.calculate_req(problem, opts,
                 post_process_hook, name, req_info, coef_info, save_names_loc,
-                dependencies, micro_states, time_tag, chunk_tab, proc_id,
-                context=context)
+                dependencies, micro_states, time_tag, chunk_tab, proc_id)
 
             lock.acquire()
             dependencies[name] = val
@@ -570,13 +532,12 @@ class HomogenizationWorkerMultiMPI(HomogenizationWorkerMulti):
     def __call__(self, problem, options, post_process_hook,
                  req_info, coef_info,
                  micro_states, store_micro_idxs, chunks_per_worker,
-                 time_tag='', context=None):
+                 time_tag=''):
         """Calculate homogenized correctors and coefficients.
 
         Parameters and Returns
         ----------------------
-        The same parameters and returns as :class:`HomogenizationWorkerMulti`,
-        extended by `context` for cache key uniqueness.
+        The same parameters and returns as :class:`HomogenizationWorkerMulti`.
         """
         multiproc = multi.multiproc_mpi
 
@@ -646,8 +607,7 @@ class HomogenizationWorkerMultiMPI(HomogenizationWorkerMulti):
                                      coef_info, save_names, dependencies,
                                      micro_states,
                                      time_tag, micro_chunk_tab,
-                                     str(multiproc.mpi_rank + 1),
-                                     context=context)
+                                     str(multiproc.mpi_rank + 1))
 
             multiproc.slave_task_done('engine')
             multiproc.wait_for_tag(multiproc.tags.CONTINUE)
@@ -746,20 +706,6 @@ class HomogenizationEngine(PDESolverApp):
 
         is_store_filenames = coef_info.pop('filenames', None) is not None
 
-        # Create the unified context that captures material parameters,
-        # frequency points, region dependencies and output file names so
-        # that every cache key / save_names entry is unique per
-        # configuration.
-        output_file_base = getattr(opts, 'coefs_filename', None) \
-            if hasattr(opts, 'coefs_filename') else None
-        extra_ids = {}
-        if hasattr(self, 'micro_states') and self.micro_states is not None:
-            extra_ids['n_micro'] = len(self.micro_states['coors'])
-        context = CoefficientContext(
-            problem=problem, time_tag=time_tag,
-            output_file_base=output_file_base, extra_ids=extra_ids)
-        self.context = context
-
         multiproc_mode = None
         if opts.multiprocessing and multi.use_multiprocessing:
             multiproc, multiproc_mode = multi.get_multiproc(mpi=opts.use_mpi)
@@ -781,16 +727,14 @@ class HomogenizationEngine(PDESolverApp):
                 worker(problem, opts, self.post_process_hook,
                        req_info, coef_info, self.micro_states,
                        self.app_options.store_micro_idxs,
-                       self.app_options.chunks_per_worker, time_tag,
-                       context=context)
+                       self.app_options.chunks_per_worker, time_tag)
 
         else:  # no multiprocessing
             worker = HomogenizationWorker()
             dependencies, save_names = \
                 worker(problem, opts, self.post_process_hook,
                        req_info, coef_info, self.micro_states,
-                       self.app_options.store_micro_idxs, time_tag,
-                       context=context)
+                       self.app_options.store_micro_idxs, time_tag)
 
         deps = {}
 
@@ -815,32 +759,20 @@ class HomogenizationEngine(PDESolverApp):
 
             # Store filenames of all requirements as a "coefficient".
             if is_store_filenames:
-                clean_save_names = {}
                 for name in save_names.keys():
-                    skey = name
-                    # Strip the context key prefix used to keep entries
-                    # unique between different configurations.
-                    if '|' in name:
-                        skey = name.split('|', 1)[1]
-                    if '|multiprocessing_' in skey:
-                        mname = rm_multi(skey)
-                        if mname in clean_save_names:
-                            clean_save_names[mname] += save_names[name]
+                    if '|multiprocessing_' in name:
+                        mname = rm_multi(name)
+                        if mname in save_names:
+                            save_names[mname] += save_names[name]
                         else:
-                            clean_save_names[mname] = save_names[name]
-                    else:
-                        clean_save_names[skey] = save_names[name]
+                            save_names[mname] = save_names[name]
+                        del(save_names[name])
 
                 if multiproc_mode == 'proc':
-                    coefs.save_names = clean_save_names
+                    coefs.save_names = save_names._getvalue()
                 else:
-                    coefs.save_names = clean_save_names
+                    coefs.save_names = save_names
 
-            # Attach the cache-context metadata so downstream (recovery,
-            # file I/O) can verify / differentiate configurations.
-            coefs.cache_context_key = context.get_cache_key()
-            coefs.cache_context = context.to_dict() if hasattr(context, 'to_dict') \
-                else {k: v for k, v in context.__dict__.items()}
 
             if opts.coefs_info is not None:
                 coefs.info = opts.coefs_info
