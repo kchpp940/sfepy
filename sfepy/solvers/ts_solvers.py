@@ -9,10 +9,9 @@ import numpy as nm
 from sfepy.base.base import (get_default, output, assert_, Struct)
 from sfepy.base.timing import Timer
 from sfepy.linalg.utils import output_array_stats
-from sfepy.solvers.history import attach_history, get_history
 from sfepy.solvers.solvers import TimeSteppingSolver, NonlinearSolver
 from sfepy.solvers.ls import RMMSolver
-from sfepy.solvers.ts_controllers import FixedTSC, record_tsc
+from sfepy.solvers.ts_controllers import FixedTSC
 from sfepy.solvers.ts import TimeStepper, VariableTimeStepper
 
 def standard_ts_call(call):
@@ -89,11 +88,6 @@ def standard_ts_call(call):
 
                 _nls = nls.copy()
                 _nls.__class__ = _TimingNLS
-
-            # Attach a unified convergence history (idempotent).
-            history = get_history(status)
-            if history is None:
-                attach_history(status)
 
         result = call(self, vec0=vec0, nls=_nls, init_fun=init_fun,
                       prestep_fun=prestep_fun, poststep_fun=poststep_fun,
@@ -202,7 +196,6 @@ class SimpleTimeSteppingSolver(TimeSteppingSolver):
         """
         ts = self.ts
         nls = get_default(nls, self.nls)
-        history = get_history(status)
 
         vec0 = init_fun(ts, vec0)
 
@@ -213,7 +206,6 @@ class SimpleTimeSteppingSolver(TimeSteppingSolver):
             vec = self.solve_step0(nls, vec0)
 
             vec = poststep_fun(ts, vec)
-            record_tsc(history, ts, ts.dt, Struct(result='accept'))
             ts.advance()
 
         else:
@@ -227,8 +219,6 @@ class SimpleTimeSteppingSolver(TimeSteppingSolver):
             vect = self.solve_step(ts, nls, vec, prestep_fun)
 
             vect = poststep_fun(ts, vect)
-
-            record_tsc(history, ts, ts.dt, Struct(result='accept'))
 
             vec = vect
 
@@ -373,78 +363,23 @@ class AdaptiveTimeSteppingSolver(SimpleTimeSteppingSolver):
         """
         Solve a single time step.
         """
-        history = get_history(nls.status)
         while 1:
             vect = nls(vec, status=nls.status)
 
-            old_dt = ts.dt
             is_break = self.adapt_time_step(ts, nls.status, self.adt,
                                             self.context, verbose=self.verbose)
 
             if is_break:
                 break
 
-            record_tsc(history, ts, ts.dt,
-                       Struct(result='reject',
-                              condition=nls.status.get('condition'),
-                              n_iter=nls.status.get('n_iter')),
-                       nls_status=nls.status)
-
             vec = prestep_fun(ts, vec)
 
         return vect
-
-    def _record_ts(self, ts, history, nls_status=None):
-        record_tsc(history, ts, ts.dt,
-                   Struct(result='accept'),
-                   nls_status=nls_status)
 
     def output_step_info(self, ts):
         output(self.format % (ts.time, ts.dt, self.adt.wait,
                               ts.step + 1, ts.n_step),
                verbose=self.verbose)
-
-    @standard_ts_call
-    def __call__(self, vec0=None, nls=None, init_fun=None, prestep_fun=None,
-                 poststep_fun=None, status=None, **kwargs):
-        """
-        Solve the time-dependent problem with adaptive time stepping.
-        """
-        ts = self.ts
-        nls = get_default(nls, self.nls)
-        history = get_history(status)
-
-        vec0 = init_fun(ts, vec0)
-
-        self.output_step_info(ts)
-        if ts.step == 0:
-            vec0 = prestep_fun(ts, vec0)
-
-            vec = self.solve_step0(nls, vec0)
-
-            vec = poststep_fun(ts, vec)
-            if history is not None:
-                self._record_ts(ts, history, nls.status)
-            ts.advance()
-
-        else:
-            vec = vec0
-
-        for step, time in ts.iter_from(ts.step):
-            self.output_step_info(ts)
-
-            vec = prestep_fun(ts, vec)
-
-            vect = self.solve_step(ts, nls, vec, prestep_fun)
-
-            vect = poststep_fun(ts, vect)
-
-            if history is not None:
-                self._record_ts(ts, history, nls.status)
-
-            vec = vect
-
-        return vec
 
 #
 # Elastodynamics solvers.
@@ -776,7 +711,6 @@ class ElastodynamicsBaseTS(TimeSteppingSolver):
         dt0 = self.tsc.get_initial_dt(ts, vec, unpack=unpack)
         if not isinstance(self.tsc, FixedTSC):
             ts.set_time_step(dt0, update_time=True)
-        history = get_history(status)
         while 1:
             output(self.format % (ts.time, ts.step + 1, ts.n_step),
                    verbose=self.verbose)
@@ -795,27 +729,23 @@ class ElastodynamicsBaseTS(TimeSteppingSolver):
 
                 if isinstance(self.tsc, FixedTSC):
                     new_dt = ts.dt
-                    tsc_status = None
                     break
 
-                new_dt, tsc_status = self.tsc(ts, vec, vect, unpack=unpack)
-                output('dt:', ts.dt, 'new dt:', new_dt,
-                       'status:', tsc_status, verbose=self.verbose)
+                new_dt, status = self.tsc(ts, vec, vect, unpack=unpack)
+                output('dt:', ts.dt, 'new dt:', new_dt, 'status:', status,
+                       verbose=self.verbose)
                 if new_dt != ts.dt:
                     self.clear_lin_solver(
                         clear_constant_matrices=self.conf.has_time_derivatives,
                     )
 
-                if tsc_status.result == 'accept':
+                if status.result == 'accept':
                     break
 
-                record_tsc(history, ts, new_dt, tsc_status, nls_status=nls.status)
                 ts.set_time_step(new_dt, update_time=True)
 
             # Current step state q(t_{n+1}).
             vect = poststep_fun(ts, vect)
-
-            record_tsc(history, ts, new_dt, tsc_status, nls_status=nls.status)
 
             if ts.nt >= 1:
                 break

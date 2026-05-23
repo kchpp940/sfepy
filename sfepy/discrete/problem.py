@@ -1504,8 +1504,6 @@ class Problem(Struct):
         if status is None:
             status = IndexedStruct()
 
-        self.status = status
-
         if self.solver is None:
             self.init_solvers(status=status)
 
@@ -1594,28 +1592,10 @@ class Problem(Struct):
 
             variables.set_state(vec, self.active_only)
 
-        if report_nls_status or log_nls_status:
-            history = status.get('history', None)
-            if history is not None:
-                summary = history.summary()
-                output('convergence history summary:')
-                for key, val in summary.items():
-                    output(f'  {key}: {val}')
-
         if post_process_hook_final is not None: # User postprocessing.
             post_process_hook_final(self, variables)
 
         return variables
-
-    def get_history(self):
-        """
-        Return the :class:`sfepy.solvers.history.ConvergenceHistory` instance
-        attached to the top-level solver ``status``, if any.
-        """
-        try:
-            return self.status.get('history', None)
-        except Exception:
-            return getattr(self.status, 'history', None)
 
     def block_solve(self, state0=None, status=None, save_results=True,
                     step_hook=None, post_process_hook=None,

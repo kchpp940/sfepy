@@ -1,3 +1,6 @@
+import json
+import os.path as op
+
 import numpy as nm
 
 from sfepy.base.base import ordered_iteritems, Struct
@@ -29,6 +32,162 @@ class Coefficients(Struct):
                     val[ii] = nm.array(vv, dtype=nm.float64)
 
         return obj
+
+    @staticmethod
+    def merge(coefficients, labels=None):
+        """Merge several ``Coefficients`` instances into one.
+
+        Each coefficient attribute becomes a list/array of length
+        ``len(coefficients)``.  An extra attribute ``labels`` (if ``labels``
+        is not ``None``) is added so that the merged object can be indexed
+        by the label of the source case.
+
+        Parameters
+        ----------
+        coefficients : iterable of Coefficients
+            The per-case coefficients to merge.
+        labels : iterable of str or None
+            Case labels, used as the ``labels`` attribute on the returned
+            object.
+        """
+        coefficients = list(coefficients)
+        if labels is not None:
+            labels = list(labels)
+            if len(labels) != len(coefficients):
+                raise ValueError('length of labels must match the number of '
+                                 'coefficients')
+        merged = Coefficients()
+        if labels is not None:
+            merged.labels = list(labels)
+        merged._num_cases = len(coefficients)
+
+        attrs = set()
+        for c in coefficients:
+            if c is not None:
+                attrs.update(getattr(c, '__dict__', {}).keys())
+
+        for name in attrs:
+            values = [getattr(c, name, None) if c is not None else None
+                      for c in coefficients]
+            try:
+                merged.__dict__[name] = nm.array(values)
+            except (ValueError, TypeError):
+                merged.__dict__[name] = list(values)
+
+        return merged
+
+    @staticmethod
+    def from_sweep_hdf5(filename):
+        """Restore a merged ``Coefficients`` from a sweep HDF5 archive.
+
+        Parameters
+        ----------
+        filename : str
+            Path to the ``*_sweep.h5`` file written by
+            ``HomogenizationApp._save_sweep_archive``.
+
+        Returns
+        -------
+        merged : Coefficients
+            A merged ``Coefficients`` with ``labels`` and per-case
+            coefficient arrays under ``_cases/<label>/<coef_name>``.
+        """
+        import tables as pt
+
+        fd = pt.open_file(filename, mode='r')
+        try:
+            raw_labels = fd.root._f_get_child('labels').read()
+            labels = [s.decode() if isinstance(s, bytes) else s
+                      for s in raw_labels]
+
+            merged = Coefficients()
+            merged.labels = labels
+            merged._num_cases = len(labels)
+
+            cases = {}
+            for label in labels:
+                try:
+                    cgrp = fd.root._f_get_child('cases')._f_get_child(label)
+                except LookupError:
+                    continue
+                for leaf in cgrp._f_leaves.values():
+                    coef_name = leaf._v_name
+                    if coef_name not in cases:
+                        cases[coef_name] = [None] * len(labels)
+                    idx = labels.index(label)
+                    cases[coef_name][idx] = leaf.read()
+
+            for coef_name, values in cases.items():
+                try:
+                    merged.__dict__[coef_name] = nm.array(values)
+                except (ValueError, TypeError):
+                    merged.__dict__[coef_name] = list(values)
+
+            return merged
+        finally:
+            fd.close()
+
+    def group_by(self, *keys):
+        """Group case labels by sweep parameter values.
+
+        Only works on merged ``Coefficients`` that carry
+        ``_sweep_cases`` (i.e. produced by ``HomogenizationApp._run_sweep``).
+
+        Parameters
+        ----------
+        keys : tuple of str
+            Parameter names to group by (e.g. ``'material_index'``,
+            ``'frequency'``).
+
+        Returns
+        -------
+        groups : dict
+            ``{tuple_of_values: [label, ...]}``.  When a single key is given
+            the outer tuple is unwrapped.
+        """
+        sweep_cases = getattr(self, '_sweep_cases', None)
+        if sweep_cases is None:
+            raise ValueError('group_by requires _sweep_cases; '
+                             'use Coefficients.from_sweep_hdf5() or '
+                             'run HomogenizationApp with sweep options')
+
+        groups = {}
+        for c in sweep_cases:
+            key = tuple(c.params.get(k) for k in keys)
+            groups.setdefault(key, []).append(c.label)
+        if len(keys) == 1:
+            return {k[0]: v for k, v in groups.items()}
+        return groups
+
+    def select_case(self, case):
+        """Return a new ``Coefficients`` with only the given case.
+
+        ``case`` may be an ``int`` index or a ``str`` label (requires the
+        instance to have a ``labels`` attribute).
+        """
+        if isinstance(case, str):
+            labels = getattr(self, 'labels', None)
+            if labels is None:
+                raise ValueError('no labels on Coefficients; cannot index '
+                                 'by name')
+            try:
+                idx = labels.index(case)
+            except ValueError:
+                raise KeyError('label %r not found' % case)
+        else:
+            idx = case
+        out = Coefficients()
+        for name, val in self.__dict__.items():
+            if name in ('labels', '_num_cases', '_sweep_cases',
+                        '_sweep_labels', '_sweep_indices', '_sweep_groups'):
+                continue
+            if isinstance(val, nm.ndarray):
+                out.__dict__[name] = val[idx]
+            elif isinstance(val, list):
+                out.__dict__[name] = val[idx]
+            else:
+                out.__dict__[name] = val
+        return out
 
     def to_file_hdf5(self, filename):
         write_dict_hdf5(filename, self.__dict__)

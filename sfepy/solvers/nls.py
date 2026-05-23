@@ -9,7 +9,6 @@ import numpy.linalg as nla
 from sfepy.base.base import output, get_default, Struct
 from sfepy.base.log import Log, get_logging_conf
 from sfepy.base.timing import Timer, Timers
-from sfepy.solvers.history import attach_history, get_history
 from sfepy.solvers.solvers import NonlinearSolver
 
 def standard_nls_call(call):
@@ -605,20 +604,6 @@ class Newton(NonlinearSolver):
         apply_line_search = get_default(conf.line_search_fun,
                                         apply_line_search_bt)
 
-        history = get_history(status)
-        if history is None:
-            history = attach_history(status)
-        nls_record = (history.begin_nls() if history is not None
-                      else None)
-        if nls_record is not None:
-            try:
-                nls_record['ts'] = {
-                    'step': getattr(self.context.ts, 'step', None),
-                    'time': getattr(self.context.ts, 'time', None),
-                }
-            except Exception:
-                pass
-
         timers = Timers(['residual', 'matrix', 'solve'])
         if conf.check:
             timers.create('check')
@@ -656,20 +641,6 @@ class Newton(NonlinearSolver):
 
             if (self.log is not None) and ('iteration' in conf.log_vlines):
                 self.log.plot_vlines([1], color='g', linewidth=0.5)
-
-            err_rel = err / err0 if (err0 and abs(err0) > conf.macheps) else 0.0
-            if history is not None:
-                history.record_nls_iteration(
-                    nls_record,
-                    iter=it,
-                    err=float(err),
-                    err_rel=float(err_rel),
-                    ok=bool(ok),
-                    ls_iter=int(ls_status.get('n_iter', -1)),
-                    ls_eps_a=ls_status.get('eps_a'),
-                    ls_eps_r=ls_status.get('eps_r'),
-                    time=float(timers.get_totals().get('residual', 0.0)),
-                )
 
             condition = conv_test(conf, it, err, err0)
             if condition >= 0:
@@ -722,23 +693,6 @@ class Newton(NonlinearSolver):
             status['n_iter'] = it
             status['ls_n_iter'] = ls_n_iter
             status['condition'] = condition
-
-        if history is not None:
-            history.end_nls(
-                nls_record,
-                n_iter=int(it),
-                ls_n_iter=int(ls_n_iter),
-                err0=float(err0),
-                err=float(err),
-                condition=int(condition),
-                time_stats=time_stats,
-            )
-            history.record_ls(
-                run=len(history.nls) - 1,
-                n_iter=int(ls_n_iter),
-                n_nls_iter=int(it),
-                time=float(time_stats.get('solve', 0.0)),
-            )
 
         if conf.report_status:
             output(f'cond: {condition}, iter: {it}, ls_iter: {ls_n_iter},'
@@ -818,32 +772,6 @@ class ScipyRoot(NonlinearSolver):
             status['n_iter'] = nit
             status['n_fev'] = sol.nfev
             status['condition'] = sol.status
-
-        history = get_history(status)
-        if history is None:
-            history = attach_history(status)
-        if history is not None:
-            nls_record = history.begin_nls()
-            try:
-                nls_record['ts'] = {
-                    'step': getattr(self.context.ts, 'step', None),
-                    'time': getattr(self.context.ts, 'time', None),
-                }
-            except Exception:
-                pass
-            history.record_nls_iteration(
-                nls_record, iter=0, err=float(err),
-                ok=(sol.status >= 0), ls_iter=-1,
-            )
-            history.end_nls(
-                nls_record,
-                n_iter=int(nit),
-                n_fev=int(sol.nfev),
-                err=float(err),
-                condition=int(sol.status),
-                time_stats=status.get('time_stats') if status is not None else {},
-                message=str(sol.message),
-            )
 
         if conf.report_status:
             output(sol.message)
@@ -1005,34 +933,6 @@ class PETScNonlinearSolver(NonlinearSolver):
             status['n_iter'] = n_iter
             status['ls_n_iter'] = ls_n_iter
             status['condition'] = condition
-
-        history = get_history(status)
-        if history is None:
-            history = attach_history(status)
-        if history is not None:
-            nls_record = history.begin_nls()
-            try:
-                nls_record['ts'] = {
-                    'step': getattr(self.context.ts, 'step', None),
-                    'time': getattr(self.context.ts, 'time', None),
-                }
-            except Exception:
-                pass
-            history.record_nls_iteration(
-                nls_record, iter=n_iter, err=float(err),
-                ok=converged, ls_iter=int(ls_n_iter),
-            )
-            history.end_nls(
-                nls_record,
-                n_iter=int(n_iter),
-                ls_n_iter=int(ls_n_iter),
-                err0=float(err0),
-                err=float(err),
-                condition=int(condition),
-                reason=reason,
-                n_fev=int(snes.getFunctionEvaluations()),
-                time_stats=status.get('time_stats') if status is not None else {},
-            )
 
         if conf.report_status:
             output(f'cond: {condition}, iter: {n_iter}, ls_iter: {ls_n_iter},'

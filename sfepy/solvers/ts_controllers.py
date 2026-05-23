@@ -6,56 +6,6 @@ import numpy as nm
 from sfepy.base.base import Struct
 from sfepy.solvers.solvers import TimeStepController
 
-
-def record_tsc(history, ts, new_dt, tsc_status, nls_status=None):
-    """
-    Record a time step controller decision into the convergence history.
-
-    Parameters
-    ----------
-    history : ConvergenceHistory or None
-        The history object. If None, nothing is recorded.
-    ts : TimeStepper
-        The time stepper with ``step``, ``time``, ``dt`` attributes.
-    new_dt : float
-        The new (proposed) time step.
-    tsc_status : Struct or None
-        The status returned by the time step controller with ``result``,
-        ``u_err``, ``v_err``, ``emax`` etc.
-    nls_status : dict-like or None
-        Optional NLS status dict to attach ``n_iter``, ``ls_n_iter``,
-        ``condition``.
-    """
-    if history is None:
-        return
-
-    tsc_fields = {}
-    if tsc_status is not None:
-        if hasattr(tsc_status, 'to_dict'):
-            tsc_fields.update(tsc_status.to_dict())
-        elif hasattr(tsc_status, '__dict__'):
-            tsc_fields.update(vars(tsc_status))
-
-    result = tsc_fields.get('result', 'accept')
-    tsc_fields.setdefault('result', result)
-
-    if nls_status is not None:
-        try:
-            tsc_fields['n_iter'] = nls_status.get('n_iter')
-            tsc_fields['ls_n_iter'] = nls_status.get('ls_n_iter')
-            tsc_fields['condition'] = nls_status.get('condition')
-        except Exception:
-            pass
-
-    history.record_ts(
-        step=int(ts.step),
-        time=float(ts.time),
-        dt=float(ts.dt),
-        dt_new=float(new_dt),
-        tsc=tsc_fields,
-    )
-
-
 class FixedTSC(TimeStepController):
     """
     Fixed (do-nothing) time step controller.
