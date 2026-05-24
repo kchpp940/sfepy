@@ -9,6 +9,57 @@ from .utils import iter_sym, iter_nonsym, create_pis, create_scalar_pis,\
     rm_multi
 
 
+class SaveNamePolicy:
+    """Centralised naming for corrector/coefficient files.
+
+    Hides ``save_name`` base paths, ``time_tag`` / ``micro`` suffixes and the
+    ``|multiprocessing_NNN`` chunk convention behind a single object so callers
+    do not mutate ``mini_app.save_name`` while sharing names across
+    ``HomogenizationWorker``, ``CorrMiniApp.save`` and recovery helpers.
+    """
+
+    chunk_suffix_template = '|multiprocessing_%03d'
+
+    def __init__(self, base=None, output_dir=None, time_tag=''):
+        self.base = base
+        self.output_dir = output_dir
+        self.time_tag = time_tag
+
+    @classmethod
+    def from_mini_app(cls, mini_app, time_tag=''):
+        base = getattr(mini_app, 'save_name', None)
+        output_dir = getattr(mini_app, 'output_dir', None)
+        return cls(base=base, output_dir=output_dir, time_tag=time_tag)
+
+    @staticmethod
+    def strip_chunk(name):
+        return rm_multi(name)
+
+    @staticmethod
+    def add_chunk(name, chunk_id):
+        return '%s%s' % (name, SaveNamePolicy.chunk_suffix_template % chunk_id)
+
+    @staticmethod
+    def has_chunk(name):
+        return '|multiprocessing_' in name
+
+    def for_micro(self, micro_id):
+        if self.base is None:
+            return None
+        return '%s_%04d' % (self.base, micro_id)
+
+    def with_time_tag(self):
+        if self.base is None:
+            return None
+        return self.base + self.time_tag
+
+    def full_save_name(self, save_format='h5', stamp=''):
+        base = self.with_time_tag()
+        if base is None:
+            return None
+        return '.'.join((base + stamp, save_format))
+
+
 class MiniAppBase(Struct):
     def any_from_conf(name, problem, kwargs):
         try:
@@ -168,6 +219,9 @@ class CorrMiniApp(MiniAppBase):
 
     def get_save_name_base(self):
         return self.save_name
+
+    def get_save_name_policy(self, time_tag=''):
+        return SaveNamePolicy.from_mini_app(self, time_tag=time_tag)
 
     def get_save_name(self, save_format='.h5', stamp=''):
         save_name_base = self.get_save_name_base()

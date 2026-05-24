@@ -3,11 +3,79 @@ from copy import copy
 
 from sfepy.base.base import output, get_default, Struct
 from sfepy.applications import PDESolverApp, Application
-from .coefs_base import MiniAppBase, CoefEval
+from .coefs_base import MiniAppBase, CoefEval, SaveNamePolicy
 from .utils import rm_multi
 from sfepy.discrete.evaluate import eval_equations
 import sfepy.base.multiproc as multi
 import numpy as nm
+
+
+class HomogContext:
+    """Explicit shared state for one homogenization run.
+
+    Holds the per-run mutable bags that were previously threaded through
+    ``HomogenizationWorker.calculate_req`` and
+    ``HomogenizationWorker.calculate`` as loose positional arguments
+    (``problem``, ``options``, ``post_process_hook``, ``req_info``,
+    ``coef_info``, ``save_names``, ``dependencies``, ``micro_states``,
+    ``time_tag``). By grouping them into one object we make the data flow
+    explicit: every helper consumes exactly the same context instead of
+    relying on the reader to compare parameter lists across five call
+    sites.
+    """
+
+    __slots__ = (
+        'problem', 'options', 'post_process_hook',
+        'req_info', 'coef_info',
+        'save_names', 'dependencies',
+        'micro_states', 'time_tag',
+        'store_micro_idxs', 'chunk_tab', 'proc_id',
+    )
+
+    def __init__(self, problem, options, post_process_hook,
+                 req_info, coef_info,
+                 save_names=None, dependencies=None,
+                 micro_states=None, time_tag='',
+                 store_micro_idxs=None, chunk_tab=None, proc_id='0'):
+        self.problem = problem
+        self.options = options
+        self.post_process_hook = post_process_hook
+        self.req_info = req_info
+        self.coef_info = coef_info
+        self.save_names = {} if save_names is None else save_names
+        self.dependencies = {} if dependencies is None else dependencies
+        self.micro_states = micro_states
+        self.time_tag = time_tag
+        self.store_micro_idxs = store_micro_idxs
+        self.chunk_tab = chunk_tab
+        self.proc_id = proc_id
+
+    @property
+    def compute_only(self):
+        return self.options.compute_only
+
+    def info_for(self, name):
+        if name.startswith('c.'):
+            return self.coef_info[name[2:]]
+        return self.req_info[name]
+
+    def record_dependency(self, name, value):
+        self.dependencies[name] = value
+
+    def record_save_name(self, name, value):
+        if name not in self.save_names:
+            self.save_names[name] = []
+        self.save_names[name].append(value)
+
+    def collapse_save_names(self):
+        for name in list(self.save_names.keys()):
+            if SaveNamePolicy.has_chunk(name):
+                mname = SaveNamePolicy.strip_chunk(name)
+                if mname in self.save_names:
+                    self.save_names[mname] += self.save_names[name]
+                else:
+                    self.save_names[mname] = self.save_names[name]
+                del self.save_names[name]
 
 
 def insert_sub_reqs(reqs, levels, req_info):
@@ -86,24 +154,30 @@ class HomogenizationWorker:
         save_names : list
             The names of computed dependencies.
         """
-        dependencies = {}
-        save_names = {}
-        sorted_names = self.get_sorted_dependencies(req_info, coef_info,
-                                                    options.compute_only)
+        ctx = HomogContext(
+            problem=problem, options=options,
+            post_process_hook=post_process_hook,
+            req_info=req_info, coef_info=coef_info,
+            micro_states=micro_states,
+            store_micro_idxs=store_micro_idxs,
+            time_tag=time_tag,
+        )
+        return self.run(ctx)
+
+    def run(self, ctx):
+        sorted_names = self.get_sorted_dependencies(
+            ctx.req_info, ctx.coef_info, ctx.compute_only)
         for name in sorted_names:
             if not name.startswith('c.'):
-                if micro_states is not None:
-                    req_info[name]['store_idxs'] = (store_micro_idxs, 0)
+                if ctx.micro_states is not None:
+                    ctx.req_info[name]['store_idxs'] = (
+                        ctx.store_micro_idxs, 0)
 
-            val = self.calculate_req(problem, options, post_process_hook,
-                                     name, req_info, coef_info, save_names,
-                                     dependencies, micro_states,
-                                     time_tag)
-
-            dependencies[name] = val
+            val = self.calculate_req(ctx, name)
+            ctx.record_dependency(name, val)
             gc.collect()
 
-        return dependencies, save_names
+        return ctx.dependencies, ctx.save_names
 
     @staticmethod
     def get_sorted_dependencies(req_info, coef_info, compute_only):
@@ -126,8 +200,13 @@ class HomogenizationWorker:
         return dep_names
 
     @staticmethod
-    def calculate(mini_app, problem, dependencies, dep_requires,
-                  save_names, micro_states, chunk_tab, mode, proc_id):
+    def calculate(ctx, mini_app, dep_requires, mode):
+        dependencies = ctx.dependencies
+        micro_states = ctx.micro_states
+        save_names = ctx.save_names
+        chunk_tab = ctx.chunk_tab
+        proc_id = ctx.proc_id
+
         if micro_states is None:
             data = {key: dependencies[key] for key in dep_requires
                     if 'Volume_' not in key}
@@ -150,7 +229,7 @@ class HomogenizationWorker:
             mini_app.requires = [ii for ii in mini_app.requires
                                  if 'c.Volume_' not in ii]
 
-            if '|multiprocessing_' in mini_app.name\
+            if SaveNamePolicy.has_chunk(mini_app.name)\
                     and chunk_tab is not None:
                 chunk_id = int(mini_app.name[-3:])
                 chunk_tag = '-%d' % (chunk_id + 1)
@@ -169,6 +248,7 @@ class HomogenizationWorker:
             for im in range(len(local_coors)):
                 output('== micro %s%s-%d =='
                        % (proc_id, chunk_tag, im + 1))
+                problem = ctx.problem
                 problem.micro_state = (local_state, im)
                 problem.set_mesh_coors(local_coors[im], update_fields=True,
                                        clear_all=False, actual=True)
@@ -201,63 +281,39 @@ class HomogenizationWorker:
         return val
 
     @staticmethod
-    def calculate_req(problem, opts, post_process_hook,
-                      name, req_info, coef_info, save_names, dependencies,
-                      micro_states, time_tag='', chunk_tab=None, proc_id='0'):
+    def calculate_req(ctx, name):
         """Calculate a requirement, i.e. correctors or coefficients.
 
         Parameters
         ----------
-        problem : problem
-            The problem definition related to the microstructure.
-        opts : struct
-            The options of the homogenization application.
-        post_process_hook : function
-            The postprocessing hook.
+        ctx : HomogContext
+            The shared run context.
         name : str
             The name of the requirement.
-        req_info : dict
-            The definition of correctors.
-        coef_info : dict
-            The definition of homogenized coefficients.
-        save_names : dict
-            The dictionary containing names of saved correctors.
-        dependencies : dict
-            The dependencies required by the correctors/coefficients.
-        micro_states : array
-            The configurations of multiple microstructures.
-        time_tag : str
-            The label corresponding to the actual time step and iteration,
-            used in the corrector file names.
-        chunk_tab : list
-            In the case of multiprocessing the requirements are divided into
-            several chunks that are solved in parallel.
-        proc_id : int
-            The id number of the processor (core) which is solving the actual
-            chunk.
 
         Returns
         -------
         val : coefficient/corrector or list of coefficients/correctors
             The resulting homogenized coefficients or correctors.
         """
+        problem = ctx.problem
+        opts = ctx.options
+
         # compute coefficient
         if name.startswith('c.'):
             coef_name = name[2:]
 
             output('computing %s...' % coef_name)
 
-            cargs = coef_info[coef_name]
+            cargs = ctx.coef_info[coef_name]
             mini_app = MiniAppBase.any_from_conf(coef_name, problem, cargs)
             problem.clear_equations()
 
             # Pass only the direct dependencies, not the indirect ones.
             dep_requires = cargs.get('requires', [])
 
-            val = HomogenizationWorker.calculate(mini_app, problem,
-                                                 dependencies, dep_requires,
-                                                 save_names, micro_states,
-                                                 chunk_tab, 'coefs', proc_id)
+            val = HomogenizationWorker.calculate(
+                ctx, mini_app, dep_requires, 'coefs')
 
             output('...done')
 
@@ -265,23 +321,21 @@ class HomogenizationWorker:
         else:
             output('computing dependency %s...' % name)
 
-            rargs = req_info[name]
+            rargs = ctx.req_info[name]
             mini_app = MiniAppBase.any_from_conf(name, problem, rargs)
             mini_app.setup_output(save_formats=opts.save_formats,
-                                  post_process_hook=post_process_hook,
+                                  post_process_hook=ctx.post_process_hook,
                                   split_results_by=opts.split_results_by)
             if mini_app.save_name is not None:
-                mini_app.save_name += time_tag
+                mini_app.save_name += ctx.time_tag
 
             problem.clear_equations()
 
             # Pass only the direct dependencies, not the indirect ones.
             dep_requires = rargs.get('requires', [])
 
-            val = HomogenizationWorker.calculate(mini_app, problem,
-                                                 dependencies, dep_requires,
-                                                 save_names, micro_states,
-                                                 chunk_tab, 'reqs', proc_id)
+            val = HomogenizationWorker.calculate(
+                ctx, mini_app, dep_requires, 'reqs')
 
             output('...done')
 
@@ -395,6 +449,16 @@ class HomogenizationWorkerMulti(HomogenizationWorker):
 
         For the definition of other parameters see 'calculate_req'.
         """
+        ctx = HomogContext(
+            problem=problem, options=opts,
+            post_process_hook=post_process_hook,
+            req_info=req_info, coef_info=coef_info,
+            save_names=save_names,
+            dependencies=dependencies,
+            micro_states=micro_states,
+            time_tag=time_tag,
+            chunk_tab=chunk_tab, proc_id=proc_id,
+        )
         while remaining.value > 0:
             name = tasks.get()
 
@@ -402,9 +466,17 @@ class HomogenizationWorkerMulti(HomogenizationWorker):
                 continue
 
             save_names_loc = {}
-            val = HomogenizationWorker.calculate_req(problem, opts,
-                post_process_hook, name, req_info, coef_info, save_names_loc,
-                dependencies, micro_states, time_tag, chunk_tab, proc_id)
+            local_ctx = HomogContext(
+                problem=ctx.problem, options=ctx.options,
+                post_process_hook=ctx.post_process_hook,
+                req_info=ctx.req_info, coef_info=ctx.coef_info,
+                save_names=save_names_loc,
+                dependencies=ctx.dependencies,
+                micro_states=ctx.micro_states,
+                time_tag=ctx.time_tag,
+                chunk_tab=ctx.chunk_tab, proc_id=ctx.proc_id,
+            )
+            val = HomogenizationWorker.calculate_req(local_ctx, name)
 
             lock.acquire()
             dependencies[name] = val
@@ -759,14 +831,14 @@ class HomogenizationEngine(PDESolverApp):
 
             # Store filenames of all requirements as a "coefficient".
             if is_store_filenames:
-                for name in save_names.keys():
-                    if '|multiprocessing_' in name:
-                        mname = rm_multi(name)
+                for name in list(save_names.keys()):
+                    if SaveNamePolicy.has_chunk(name):
+                        mname = SaveNamePolicy.strip_chunk(name)
                         if mname in save_names:
                             save_names[mname] += save_names[name]
                         else:
                             save_names[mname] = save_names[name]
-                        del(save_names[name])
+                        del save_names[name]
 
                 if multiproc_mode == 'proc':
                     coefs.save_names = save_names._getvalue()

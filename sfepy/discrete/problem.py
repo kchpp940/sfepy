@@ -30,28 +30,6 @@ from sfepy.solvers.solvers import use_first_available
 from sfepy.solvers.ts_solvers import (StationarySolver, ElastodynamicsBaseTS,
                                       transform_equations_ed)
 
-##
-# =============================================================================
-# Module layout  (please keep this up to date when adding new code)
-# =============================================================================
-#
-#   * ``make_is_save`` / ``prepare_matrix``        - tiny stateless helpers.
-#   * ``SaveCallback`` / ``RestartCallback``        - injectable IO side
-#                                                     effects, used from
-#                                                     ``Problem.get_tss_functions``.
-#   * ``build_*``                                   - pure construction
-#                                                     helpers.  Must NOT read
-#                                                     from ``Problem``.
-#   * ``ProblemBuilder``                            - the single owner of the
-#                                                     conf -> Problem wiring.
-#                                                     All new construction
-#                                                     stages go here.
-#   * ``Problem``                                   - runtime container only.
-#                                                     ``set_*`` methods that
-#                                                     remain are thin wrappers
-#                                                     around ``build_*``.
-# =============================================================================
-
 def make_is_save(options):
     """
     Given problem options, return a callable that determines whether to save
@@ -111,400 +89,7 @@ def prepare_matrix(problem, state):
     return mtx
 
 ##
-# =============================================================================
-# Solve-time lifecycle helpers  (injectable IO / callbacks)
-# =============================================================================
-#
-# These helpers encapsulate side-effect heavy pieces of a solve (save to disk,
-# load/save restart) so ``Problem.solve`` can focus purely on orchestrating
-# solver stages.  They take the ``Problem`` instance only as an execution
-# context and do NOT store long-lived configuration themselves;  all state is
-# either passed in (parameters) or stored on the ``Problem`` itself.
-#
-# Inject them through ``Problem.get_tss_functions(..., save_callback=...,
-# restart_callback=...)``;  when left as ``None`` the defaults below are
-# constructed automatically.
-# =============================================================================
-class SaveCallback(Struct):
-    """Encapsulate the "should I save / where do I write to" logic that used to
-    live inside ``Problem.get_tss_functions``.  The ``Problem`` is passed in
-    at call time to avoid carrying mutable state on the helper.
-
-    Parameters
-    ----------
-    save_results : bool
-    post_process_hook : callable or None
-    options : Struct-like or None
-    """
-
-    def __init__(self, save_results=True, post_process_hook=None, options=None):
-        self.save_results = save_results
-        self.post_process_hook = post_process_hook
-        self.is_save = make_is_save(options if options is not None else {})
-
-    def reset(self, ts):
-        self.is_save.reset(ts)
-
-    def __call__(self, problem, ts, variables):
-        if not (self.save_results and self.is_save(ts)):
-            return
-
-        if not isinstance(problem.get_solver(), StationarySolver):
-            suffix = ts.suffix % ts.step
-        else:
-            suffix = None
-
-        filename = problem.get_output_name(suffix=suffix)
-        problem.save_state(filename, variables,
-                           post_process_hook=self.post_process_hook,
-                           split_results_by=None,
-                           ts=ts,
-                           file_format=problem.file_format)
-
-class RestartCallback(Struct):
-    """Load/restart logic extracted from ``get_tss_functions``.  Callable with
-    ``(problem, ts)``; when a ``load_restart`` option is set it restores state
-    and advances the stepper."""
-
-    def __init__(self, load_restart=None):
-        self.load_restart = load_restart
-
-    def load(self, problem, ts, vec0):
-        if self.load_restart is None:
-            return vec0
-        variables = problem.load_restart(self.load_restart, ts=ts)
-        problem.advance(ts)
-        ts.advance()
-        return variables.get_state(problem.active_only)
-
-    def save(self, problem, ts):
-        restart_filename = problem.get_restart_filename(ts=ts)
-        if restart_filename is not None:
-            problem.save_restart(restart_filename, ts=ts)
-
-##
-# =============================================================================
-# Construction-only helpers  (do NOT add side effects here)
-# =============================================================================
-#
-# Boundary / ownership contract:
-#
-#   * ``build_*`` helpers are **pure functions**.  They take the configuration
-#     plus the minimum amount of already-prepared state and return the freshly
-#     built component(s).  They MUST NOT touch ``Problem`` fields (no reads
-#     from ``self.conf``, no writes to ``self.equations``, no solver IO).
-#
-#   * ``ProblemBuilder`` is the **only** object allowed to orchestrate a
-#     full conf -> Problem construction.  It composes ``build_*`` helpers in
-#     a well-defined stage order (see its docstring) and is the single place
-#     where cross-stage wiring (regions -> fields -> equations -> solvers)
-#     happens.  Adding a new construction step?  Add a new stage method here,
-#     not on ``Problem``.
-#
-#   * ``Problem`` is a **runtime container**.  It receives already-prepared
-#     domain / fields / equations / solver_confs and only knows how to
-#     schedule a solve via the lifecycle helpers in this same file.  It MUST
-#     NOT grow any new construction logic;  `Problem.set_*` methods that are
-#     kept for backward compatibility are thin wrappers that delegate to a
-#     ``build_*`` helper and assign the result onto ``self``.
-#
-# Extending the system?  The intended entry points are:
-#
-#   - New component kind           -> add a ``build_<kind>`` pure helper.
-#   - New construction stage       -> add a ``ProblemBuilder.setup_<stage>``.
-#   - New solve-time side effect   -> add a lifecycle helper (``*Callback``)
-#                                     and inject it via ``get_tss_functions``.
-#   - New solve scheduling concern -> add an overridable ``_<stage>`` method
-#                                     on ``Problem`` and call it from
-#                                     ``Problem.solve``.
-# =============================================================================
-def build_regions(domain, conf_regions, functions, allow_empty=False):
-    """Create regions on ``domain`` from the configuration."""
-    domain.create_regions(conf_regions, functions, allow_empty=allow_empty)
-
-def build_fields(regions, conf_fields):
-    """Return a dict of fields built from the configuration."""
-    return fields_from_conf(conf_fields, regions)
-
-def build_variables(conf_variables, fields):
-    """Return a :class:`Variables` instance built from the configuration."""
-    return Variables.from_conf(conf_variables, fields)
-
-def build_materials(conf_materials, functions):
-    """Return a :class:`Materials` instance built from the configuration."""
-    return Materials.from_conf(conf_materials, functions)
-
-def build_integrals(conf_integrals):
-    """Return an :class:`Integrals` instance built from the configuration."""
-    return Integrals.from_conf(conf_integrals)
-
-def build_equations(conf_equations, variables, regions, materials,
-                    integrals, user=None, eterm_options=None,
-                    allow_derivatives=False):
-    """Return an :class:`Equations` instance built from the configuration."""
-    return Equations.from_conf(conf_equations, variables, regions,
-                               materials, integrals, user=user,
-                               eterm_options=eterm_options,
-                               allow_derivatives=allow_derivatives)
-
-def build_solver_confs(conf_solvers, options=None):
-    """Select which solver configurations should be used.
-
-    Returns a tuple ``(solver_confs_dict, ts_conf, tsc_conf, nls_conf, ls_conf)``
-    matching the legacy ``Problem.set_conf_solvers`` API.
-    """
-    solver_confs = {}
-    for key, val in conf_solvers.items():
-        solver_confs[val.name] = val
-
-    def _find_suitable(prefix):
-        cands = []
-        for key, val in solver_confs.items():
-            if val.kind.find(prefix) == 0:
-                if val.name == prefix[:-1]:
-                    return val
-                else:
-                    cands.append(val)
-        if len(cands) > 0:
-            return cands[0]
-        else:
-            return None
-
-    def _get_solver_conf(kind):
-        try:
-            key = options[kind]
-            if key is None:
-                conf = None
-            else:
-                conf = solver_confs[key]
-        except:
-            conf = _find_suitable(kind + '.')
-        return conf
-
-    ts_conf = _get_solver_conf('ts')
-    if ts_conf is None:
-        ts_conf = Struct(name='no ts', kind='ts.stationary')
-    tsc_conf = _get_solver_conf('tsc')
-    nls_conf = _get_solver_conf('nls')
-    ls_conf = _get_solver_conf('ls')
-
-    info = 'using solvers:'
-    if ts_conf:
-        info += '\n                ts: %s' % ts_conf.name
-    if tsc_conf:
-        info += '\n               tsc: %s' % tsc_conf.name
-    if nls_conf:
-        info += '\n               nls: %s' % nls_conf.name
-    if ls_conf:
-        info += '\n                ls: %s' % ls_conf.name
-    if info != 'using solvers:':
-        output(info)
-
-    return solver_confs, ts_conf, tsc_conf, nls_conf, ls_conf
-
-##
-# =============================================================================
-# Construction orchestration  (the single place that builds a Problem from conf)
-# =============================================================================
-#
-# Ownership rule: cross-stage wiring (regions -> fields -> equations -> solvers)
-# lives here and ONLY here.  Adding a new construction step means adding a new
-# ``setup_<stage>`` method below and calling it from ``build()``;  do NOT
-# sneak construction logic back into ``Problem``.
-# =============================================================================
-class ProblemBuilder(Struct):
-    """Drive the configuration -> Problem construction pipeline.
-
-    This is the **single** owner of the cross-stage wiring between regions,
-    fields, equations and solver configurations.  ``Problem.from_conf`` and
-    ``Problem.from_conf_file`` are thin wrappers that delegate to this class.
-
-    The builder runs in well-defined stages; each stage is a separate method
-    so users can override individual pieces without reimplementing the whole
-    ``from_conf`` pipeline::
-
-        1. ``build_mesh_and_domain`` - read/refine mesh or load IGA domain
-        2. ``build_functions``       - extract user Functions from conf
-        3. ``create_problem``        - instantiate Problem with prepared data
-        4. ``setup_regions``         - create regions on the domain
-        5. ``setup_fields``          - build fields from conf
-        6. ``setup_equations``       - build equations/variables/materials
-        7. ``setup_solvers``         - pick ls/nls/ts/tsc solver confs
-
-    Calling ``build()`` executes all enabled stages and returns the
-    fully-initialized ``Problem``.
-
-    Notes
-    -----
-    The stage methods delegate to the ``build_*`` pure helpers at the top of
-    this file.  They only write the results onto the ``Problem`` instance -
-    they do not contain any additional construction logic.
-    """
-
-    name = 'problem_builder'
-
-    @staticmethod
-    def from_file(conf_filename, required=None, other=None,
-                  init_fields=True, init_equations=True,
-                  init_solvers=True):
-        """Convenience entry point equivalent to ``Problem.from_conf_file``."""
-        _required, _other = get_standard_keywords()
-        if required is None:
-            required = _required
-        if other is None:
-            other = _other
-
-        conf = ProblemConf.from_file(conf_filename, required, other)
-        return ProblemBuilder.from_conf(
-            conf, init_fields=init_fields, init_equations=init_equations,
-            init_solvers=init_solvers,
-        )
-
-    @staticmethod
-    def from_conf(conf, init_fields=True, init_equations=True,
-                  init_solvers=True):
-        """Convenience entry point equivalent to ``Problem.from_conf``."""
-        builder = ProblemBuilder(
-            conf=conf,
-            init_fields=init_fields,
-            init_equations=init_equations,
-            init_solvers=init_solvers,
-        )
-        return builder.build()
-
-    def build(self):
-        """Run all enabled stages and return the initialized ``Problem``."""
-        conf = self.conf
-        options = conf.options
-
-        domain = self.build_mesh_and_domain(conf)
-        functions = self.build_functions(conf)
-
-        active_only = options.get('active_only', True)
-        problem = self.create_problem(
-            conf=conf, functions=functions, domain=domain,
-            active_only=active_only,
-        )
-
-        allow_empty = options.get('allow_empty_regions', False)
-        self.setup_regions(problem, conf, allow_empty=allow_empty)
-
-        problem.clear_equations()
-
-        if self.init_fields:
-            self.setup_fields(problem, conf)
-
-            if self.init_equations:
-                self.setup_equations(problem, conf)
-
-        if self.init_solvers:
-            self.setup_solvers(problem, conf)
-
-        return problem
-
-    # ------------------------------------------------------------------
-    # Stage 1: configuration loading is provided by ``ProblemConf.from_file``
-    # and is intentionally left as a free function so callers can supply a
-    # pre-loaded ``ProblemConf`` directly.
-    # ------------------------------------------------------------------
-    def build_mesh_and_domain(self, conf):
-        """Stage 2: read/refine mesh or load IGA domain."""
-        if conf.options.get('absolute_mesh_path', False):
-            conf_dir = None
-        else:
-            conf_dir = op.dirname(conf.funmod.__file__)
-
-        options = conf.options
-
-        if conf.get('filename_mesh') is not None:
-            from sfepy.discrete.fem.domain import FEDomain
-
-            mesh = Mesh.from_file(conf.filename_mesh, prefix_dir=conf_dir)
-            domain = FEDomain(mesh.name, mesh)
-
-            refine = options.get('refinement_level', 0)
-            if refine > 0:
-                for ii in range(refine):
-                    output('refine %d...' % ii)
-                    domain = domain.refine()
-                    output('... %d nodes %d elements'
-                           % (domain.shape.n_nod, domain.shape.n_el))
-
-            if options.get('ulf', False):
-                domain.mesh.coors_act = domain.mesh.coors.copy()
-
-            if options.get('mesh_eps') is not None:
-                import sfepy.discrete.fem.mesh as msh
-                import sfepy.discrete.fem.periodic as per
-                msh.set_accuracy(options.mesh_eps)
-                per.set_accuracy(options.mesh_eps)
-
-        elif conf.get('filename_domain') is not None:
-            from sfepy.discrete.iga.domain import IGDomain
-            domain = IGDomain.from_file(conf.filename_domain)
-
-        else:
-            raise ValueError('missing filename_mesh or filename_domain!')
-
-        return domain
-
-    def build_functions(self, conf):
-        """Stage 3: extract user :class:`Functions` from the configuration."""
-        return Functions.from_conf(conf.functions)
-
-    def create_problem(self, conf, functions, domain, active_only=True):
-        """Stage 4: instantiate a Problem with the prepared domain/functions.
-
-        At this point the object has no fields or equations; those are added
-        by the subsequent ``setup_*`` stages.
-        """
-        return Problem(
-            'problem_from_conf', conf=conf, functions=functions,
-            domain=domain, auto_conf=False, active_only=active_only,
-        )
-
-    def setup_regions(self, problem, conf, allow_empty=False):
-        """Stage 5: create regions on the problem domain."""
-        build_regions(problem.domain, conf.regions, problem.functions,
-                     allow_empty=allow_empty)
-
-    def setup_fields(self, problem, conf):
-        """Stage 6: build fields from the configuration and attach to ``problem``."""
-        problem.fields = build_fields(problem.domain.regions, conf.fields)
-
-    def setup_equations(self, problem, conf):
-        """Stage 7: build equations, variables and materials.
-
-        Uses ``Problem.set_equations`` (which delegates to the module-level
-        pure helpers) so all construction logic lives in one place.
-        """
-        problem.set_equations(conf.get('equations', None))
-
-    def setup_solvers(self, problem, conf):
-        """Stage 8: pick the ls/nls/ts/tsc solver configurations."""
-        (problem.solver_confs, problem.ts_conf,
-         problem.tsc_conf, problem.nls_conf,
-         problem.ls_conf) = build_solver_confs(
-             conf.solvers, conf.options,
-         )
-
-##
 # 29.01.2006, c
-# =============================================================================
-# Runtime container only
-# =============================================================================
-#
-# ``Problem`` is a runtime container for an already-prepared solve.  All
-# configuration-to-object construction happens in ``ProblemBuilder`` and the
-# ``build_*`` pure helpers above;  keep construction logic OUT of this class.
-#
-# The ``set_*`` methods on ``Problem`` (``set_regions``, ``set_fields``,
-# ``set_equations``, ``set_conf_solvers``) are kept for backward compatibility
-# and for interactive use;  their bodies are thin wrappers that delegate to the
-# ``build_*`` helpers and assign the result onto ``self``.  Do NOT add new
-# construction branches here - add a new ``ProblemBuilder.setup_<stage>``
-# instead.
-# =============================================================================
 class Problem(Struct):
     """
     Problem definition, the top-level class holding all data necessary to solve
@@ -579,29 +164,81 @@ class Problem(Struct):
     def from_conf_file(conf_filename, required=None, other=None,
                        init_fields=True, init_equations=True,
                        init_solvers=True):
-        """Create a :class:`Problem` from a problem description file.
 
-        Thin wrapper around :class:`ProblemBuilder` that preserves the original
-        API; the construction stages live in :class:`ProblemBuilder`.
-        """
-        return ProblemBuilder.from_file(
-            conf_filename, required=required, other=other,
-            init_fields=init_fields, init_equations=init_equations,
-            init_solvers=init_solvers,
-        )
+        _required, _other = get_standard_keywords()
+        if required is None:
+            required = _required
+        if other is None:
+            other = _other
+
+        conf = ProblemConf.from_file(conf_filename, required, other)
+
+        obj = Problem.from_conf(conf, init_fields=init_fields,
+                                init_equations=init_equations,
+                                init_solvers=init_solvers)
+        return obj
 
     @staticmethod
     def from_conf(conf, init_fields=True, init_equations=True,
                   init_solvers=True):
-        """Create a :class:`Problem` from a :class:`ProblemConf` instance.
+        if conf.options.get('absolute_mesh_path', False):
+            conf_dir = None
+        else:
+            conf_dir = op.dirname(conf.funmod.__file__)
 
-        Thin wrapper around :class:`ProblemBuilder`; see that class for the
-        individual construction stages that can be overridden.
-        """
-        return ProblemBuilder.from_conf(
-            conf, init_fields=init_fields, init_equations=init_equations,
-            init_solvers=init_solvers,
-        )
+        functions = Functions.from_conf(conf.functions)
+
+        if conf.get('filename_mesh') is not None:
+            from sfepy.discrete.fem.domain import FEDomain
+
+            mesh = Mesh.from_file(conf.filename_mesh, prefix_dir=conf_dir)
+            domain = FEDomain(mesh.name, mesh)
+
+            refine = conf.options.get('refinement_level', 0)
+            if refine > 0:
+                for ii in range(refine):
+                    output('refine %d...' % ii)
+                    domain = domain.refine()
+                    output('... %d nodes %d elements'
+                           % (domain.shape.n_nod, domain.shape.n_el))
+
+            if conf.options.get('ulf', False):
+                domain.mesh.coors_act = domain.mesh.coors.copy()
+
+            if conf.options.get('mesh_eps') is not None:
+                import sfepy.discrete.fem.mesh as msh
+                import sfepy.discrete.fem.periodic as per
+                msh.set_accuracy(conf.options.mesh_eps)
+                per.set_accuracy(conf.options.mesh_eps)
+
+        elif conf.get('filename_domain') is not None:
+            from sfepy.discrete.iga.domain import IGDomain
+            domain = IGDomain.from_file(conf.filename_domain)
+
+        else:
+            raise ValueError('missing filename_mesh or filename_domain!')
+
+        active_only = conf.options.get('active_only', True)
+        obj = Problem('problem_from_conf', conf=conf, functions=functions,
+                      domain=domain, auto_conf=False,
+                      active_only=active_only)
+
+        allow_empty = conf.options.get('allow_empty_regions', False)
+        obj.set_regions(conf.regions, obj.functions,
+                        allow_empty=allow_empty)
+
+        obj.clear_equations()
+
+        if init_fields:
+            obj.set_fields(conf.fields)
+
+            if init_equations:
+                obj.set_equations(conf.equations)
+
+        if init_solvers:
+            obj.set_conf_solvers(conf.solvers, conf.options)
+
+        return obj
 
     def __init__(self, name, conf=None, functions=None,
                  domain=None, fields=None, equations=None, auto_conf=True,
@@ -823,18 +460,11 @@ class Problem(Struct):
 
     def set_regions(self, conf_regions=None,
                      conf_materials=None, functions=None, allow_empty=False):
-        """Assign regions built from the configuration.
-
-        This is a backward-compatible wrapper around :func:`build_regions`;
-        the construction itself lives in the module-level helper.  New code
-        should prefer :class:`ProblemBuilder` or call :func:`build_regions`
-        directly.
-        """
         conf_regions = get_default(conf_regions, self.conf.regions)
         functions = get_default(functions, self.functions)
 
-        build_regions(self.domain, conf_regions, functions,
-                     allow_empty=allow_empty)
+        self.domain.create_regions(conf_regions, functions,
+                                   allow_empty=allow_empty)
 
     def set_materials(self, conf_materials=None):
         """
@@ -855,12 +485,8 @@ class Problem(Struct):
         return conf_materials
 
     def set_fields(self, conf_fields=None):
-        """Assign fields built from the configuration.
-
-        Backward-compatible wrapper around :func:`build_fields`.
-        """
         conf_fields = get_default(conf_fields, self.conf.fields)
-        self.fields = build_fields(self.domain.regions, conf_fields)
+        self.fields = fields_from_conf(conf_fields, self.domain.regions)
 
     def set_variables(self, conf_variables=None):
         """
@@ -895,18 +521,16 @@ class Problem(Struct):
         Set equations of the problem using the `equations` problem
         description entry.
 
-        Fields and Regions have to be already set.  The actual construction
-        of variables, materials, integrals and equations is delegated to the
-        pure helpers at the module level.
+        Fields and Regions have to be already set.
         """
         conf_equations = get_default(conf_equations,
                                      self.conf.get('equations', None))
 
         self.set_variables(self.conf_variables)
-        variables = build_variables(self.conf_variables, self.fields)
+        variables = Variables.from_conf(self.conf_variables, self.fields)
 
         self.set_materials(self.conf_materials)
-        materials = build_materials(self.conf_materials, self.functions)
+        materials = Materials.from_conf(self.conf_materials, self.functions)
 
         self.integrals = self.get_integrals()
 
@@ -916,12 +540,12 @@ class Problem(Struct):
         user = default_user
         eterm_options = self.conf.options.get('eterm', {})
         transform = self.conf.options.get('auto_transform_equations', False)
-        equations = build_equations(conf_equations, variables,
-                                    self.domain.regions,
-                                    materials, self.integrals,
-                                    user=user,
-                                    eterm_options=eterm_options,
-                                    allow_derivatives=transform)
+        equations = Equations.from_conf(conf_equations, variables,
+                                        self.domain.regions,
+                                        materials, self.integrals,
+                                        user=user,
+                                        eterm_options=eterm_options,
+                                        allow_derivatives=transform)
 
         self.equations = equations
         self.set_ics(self.conf.ics)
@@ -956,7 +580,7 @@ class Problem(Struct):
             The requested integrals.
         """
         conf_integrals = self.conf.get('integrals', {})
-        integrals = build_integrals(conf_integrals)
+        integrals = Integrals.from_conf(conf_integrals)
 
         if names is not None:
             integrals.update([integrals[ii] for ii in names
@@ -1439,15 +1063,55 @@ class Problem(Struct):
         use the ones named `ls`, `nls`, `ts` and optionally `tsc`. If such
         solver names do not exist, use the first of each required solver kind
         listed in `conf_solvers`.
-
-        The selection logic lives in :func:`build_solver_confs`; this method
-        is a thin backward-compatible wrapper that assigns the result onto
-        ``self``.
         """
         conf_solvers = get_default(conf_solvers, self.conf.solvers)
-        (self.solver_confs, self.ts_conf,
-         self.tsc_conf, self.nls_conf,
-         self.ls_conf) = build_solver_confs(conf_solvers, options)
+        self.solver_confs = {}
+
+        for key, val in conf_solvers.items():
+            self.solver_confs[val.name] = val
+
+        def _find_suitable(prefix):
+            cands = []
+            for key, val in self.solver_confs.items():
+                if val.kind.find(prefix) == 0:
+                    if val.name == prefix[:-1]:
+                        return val
+                    else:
+                        cands.append(val)
+            if len(cands) > 0:
+                return cands[0]
+            else:
+                return None
+
+        def _get_solver_conf(kind):
+            try:
+                key = options[kind]
+                if key is None:
+                    conf = None
+                else:
+                    conf = self.solver_confs[key]
+            except:
+                conf = _find_suitable(kind + '.')
+            return conf
+
+        self.ts_conf = _get_solver_conf('ts')
+        if self.ts_conf is None:
+            self.ts_conf = Struct(name='no ts', kind='ts.stationary')
+        self.tsc_conf = _get_solver_conf('tsc')
+        self.nls_conf = _get_solver_conf('nls')
+        self.ls_conf = _get_solver_conf('ls')
+
+        info = 'using solvers:'
+        if self.ts_conf:
+            info += '\n                ts: %s' % self.ts_conf.name
+        if self.tsc_conf:
+            info += '\n               tsc: %s' % self.tsc_conf.name
+        if self.nls_conf:
+            info += '\n               nls: %s' % self.nls_conf.name
+        if self.ls_conf:
+            info += '\n                ls: %s' % self.ls_conf.name
+        if info != 'using solvers:':
+            output(info)
 
     def get_solver_conf(self, name):
         return self.solver_confs[name]
@@ -1630,16 +1294,10 @@ class Problem(Struct):
 
     def get_tss_functions(self, update_bcs=True, update_materials=True,
                           save_results=True,
-                          step_hook=None, post_process_hook=None,
-                          save_callback=None, restart_callback=None):
+                          step_hook=None, post_process_hook=None):
         """
         Get the problem-dependent functions required by the time-stepping
         solver during the solution process.
-
-        IO / hook side-effects can be injected via ``save_callback`` and
-        ``restart_callback``; when they are ``None``, module-level helpers are
-        constructed automatically from ``self.conf.options``, preserving the
-        previous behaviour.
 
         Parameters
         ----------
@@ -1656,10 +1314,6 @@ class Problem(Struct):
         post_process_hook : callable, optional
             The optional user-defined function that is passed in each
             `poststep_fun` to :func:`Problem.save_state()`.
-        save_callback : SaveCallback or None
-            Override the default save callback.
-        restart_callback : RestartCallback or None
-            Override the default restart callback.
 
         Returns
         -------
@@ -1671,23 +1325,22 @@ class Problem(Struct):
         poststep_fun : callable
             The function called at the end of each time step.
         """
-        if save_callback is None:
-            save_callback = SaveCallback(
-                save_results=save_results,
-                post_process_hook=post_process_hook,
-                options=self.conf.options,
-            )
-        if restart_callback is None:
-            restart_callback = RestartCallback(
-                load_restart=self.conf.options.get('load_restart', None),
-            )
+        is_save = make_is_save(self.conf.options)
 
         def init_fun(ts, vec0):
             if not ts.is_quasistatic:
                 self.init_time(ts)
 
-            save_callback.reset(ts)
-            return restart_callback.load(self, ts, vec0)
+            is_save.reset(ts)
+
+            restart_filename = self.conf.options.get('load_restart', None)
+            if restart_filename is not None:
+                variables = self.load_restart(restart_filename, ts=ts)
+                self.advance(ts)
+                ts.advance()
+                vec0 = variables.get_state(self.active_only)
+
+            return vec0
 
         def prestep_fun(ts, vec):
             if update_bcs:
@@ -1709,8 +1362,23 @@ class Problem(Struct):
             if step_hook is not None:
                 step_hook(self, ts, variables)
 
-            restart_callback.save(self, ts)
-            save_callback(self, ts, variables)
+            restart_filename = self.get_restart_filename(ts=ts)
+            if restart_filename is not None:
+                self.save_restart(restart_filename, ts=ts)
+
+            if save_results and is_save(ts):
+                if not isinstance(self.get_solver(), StationarySolver):
+                    suffix = ts.suffix % ts.step
+
+                else:
+                    suffix = None
+
+                filename = self.get_output_name(suffix=suffix)
+                self.save_state(filename, variables,
+                                post_process_hook=post_process_hook,
+                                split_results_by=None,
+                                ts=ts,
+                                file_format=self.file_format)
 
             self.advance(ts)
             return vec
@@ -1774,109 +1442,6 @@ class Problem(Struct):
 
         return self.equations.variables
 
-    def _resolve_solve_options(self, report_nls_status, log_nls_status):
-        """Merge per-call flags with the persistent configuration options."""
-        report_nls_status = getattr(
-            self.conf.options, 'report_nls_status', report_nls_status)
-        log_nls_status = getattr(
-            self.conf.options, 'log_nls_status', log_nls_status)
-        return report_nls_status, log_nls_status
-
-    def _ensure_solver_ready(self, status):
-        """Ensure a top-level solver exists, creating one from configuration
-        when necessary."""
-        if self.solver is None:
-            self.init_solvers(status=status)
-        return self.get_solver()
-
-    def _build_solve_state(self, state0, force_values):
-        """Build variables with the initial state, apply EBCs and advance time
-        to the starting point of the solve."""
-        if state0 is not None:
-            variables = self.set_default_state(vec=state0)
-        else:
-            variables = self.get_initial_state()
-        return variables
-
-    def _prepare_linear_matrix(self, variables):
-        """Pre-assemble and presolve the tangent matrix for linear problems."""
-        if self.is_linear():
-            mtx = prepare_matrix(self, variables) # Updates materials.
-            self.try_presolve(mtx)
-            self.mtx_presolved = mtx
-        return self
-
-    def _assemble_tss_functions(self, update_bcs, update_materials,
-                                save_results, step_hook, post_process_hook):
-        """Assemble the (init, prestep, poststep) callbacks handed to the
-        time-stepping solver."""
-        return self.get_tss_functions(
-            update_bcs=update_bcs, update_materials=update_materials,
-            save_results=save_results,
-            step_hook=step_hook, post_process_hook=post_process_hook)
-
-    def _run_tss(self, tss, variables, init_fun, prestep_fun, poststep_fun,
-                 status, log_nls_status):
-        """Drive the top-level time-stepping/nonlinear solver and return the
-        final solution vector."""
-        tss.set_dof_info(variables.adi)
-        vec = tss(variables.get_state(self.active_only, force=True),
-                  init_fun=init_fun,
-                  prestep_fun=prestep_fun,
-                  poststep_fun=poststep_fun,
-                  status=status,
-                  log_nls_status=log_nls_status)
-        return vec
-
-    def _report_solve_status(self, status, report_nls_status, verbose=True):
-        """Report time/step statistics collected by the solver."""
-        time_stats = status.get('time_stats')
-        if time_stats is not None:
-            output('====== time stats ======')
-            for key in time_stats.keys():
-                output('%12s: %.8f [s]' % ('nls ' + key, time_stats[key]))
-
-        if report_nls_status:
-            step_stats = status.get('step_stats')
-            if step_stats is not None:
-                output('====== step stats ======')
-                output.prefix, aux = '', output.prefix
-                output('  step,         time, cond,  nit, ls_nit,      err0,'
-                       '       err, elapsed [s]')  # 78 chars long
-                if len(step_stats) > 1 and step_stats[0].get("step") > 0:
-                    s0 = IndexedStruct(step=0, step_time=0.0, condition=0,
-                                       n_iter=0, ls_n_iter=0,
-                                       err=0, err0=0, time=0)
-                    step_stats = [s0] + step_stats
-
-                for step in step_stats:
-                    msg = f'{step.get("step") + 1:6}, '
-                    msg += f'{step.get("step_time"):.6e}, '
-                    msg += f'{step.get("condition"):4}, '
-                    msg += f'{step.get("n_iter"):4}, '
-                    msg += f'{step.get("ls_n_iter"):6}, '
-                    msg += f'{step.get("err0"):.3e}, '
-                    msg += f'{step.get("err"):.3e}, '
-                    msg += f'{step.get("time"):.4f}'
-
-                    output(msg)
-                output.prefix, aux = aux, output.prefix
-
-        output('solved in %d steps in %.2f seconds'
-               % (status['n_step'], status['time']), verbose=verbose)
-
-    def _finalize_solve(self, variables, vec, post_process_hook_final):
-        """Apply the final solution vector to variables and invoke the user
-        finalization hook, if any. For the block-solve path the solution is
-        already written to `variables`, so `vec` may be ``None``."""
-        if vec is not None:
-            variables.set_state(vec, self.active_only)
-
-        if post_process_hook_final is not None: # User postprocessing.
-            post_process_hook_final(self, variables)
-
-        return variables
-
     def solve(self, state0=None, status=None, force_values=None,
               var_data=None, update_bcs=True, update_materials=True,
               save_results=True,
@@ -1891,17 +1456,6 @@ class Problem(Struct):
         :func:`Problem.set_solver()`. Also, the boundary conditions and the
         initial conditions (for time-dependent problems) has to be set, see
         :func:`Problem.set_bcs()`, :func:`Problem.set_ics()`.
-
-        The solve is broken down into clear, individually overridable stages:
-
-        1. ``_resolve_solve_options`` - merge per-call flags with conf
-        2. ``_ensure_solver_ready`` - lazily initialize the top-level solver
-        3. ``_build_solve_state`` / ``block_solve`` - build initial variables
-        4. ``_prepare_linear_matrix`` - pre-assemble for linear problems
-        5. ``_assemble_tss_functions`` - build init/prestep/poststep callbacks
-        6. ``_run_tss`` - execute the time-stepping/nonlinear solver
-        7. ``_report_solve_status`` - emit solver statistics
-        8. ``_finalize_solve`` - apply solution and invoke final hook
 
         Parameters
         ----------
@@ -1950,15 +1504,17 @@ class Problem(Struct):
         if status is None:
             status = IndexedStruct()
 
-        # Stage 1: resolve per-call options against the persistent config.
-        report_nls_status, log_nls_status = self._resolve_solve_options(
-            report_nls_status, log_nls_status)
+        if self.solver is None:
+            self.init_solvers(status=status)
 
-        # Stage 2: ensure the top-level solver is ready (lazy init from conf).
-        tss = self._ensure_solver_ready(status)
+        tss = self.get_solver()
 
-        # Stage 3: seed parameter variables from caller-supplied data.
         self.equations.set_data(var_data, ignore_unknown=True)
+
+        report_nls_status = getattr(
+            self.conf.options, 'report_nls_status', report_nls_status)
+        log_nls_status = getattr(
+            self.conf.options, 'log_nls_status', log_nls_status)
 
         if self.conf.options.get('block_solve', False):
             variables = self.block_solve(state0, status=status,
@@ -1970,35 +1526,76 @@ class Problem(Struct):
                                          verbose=verbose)
 
         else:
-            # Stage 4: build the initial state vector and advance time.
-            variables = self._build_solve_state(state0, force_values)
+            if state0 is not None:
+                variables = self.set_default_state(vec=state0)
+
+            else:
+                variables = self.get_initial_state()
+
             self.time_update(tss.ts)
+
             variables.apply_ebc(force_values=force_values)
 
-            # Stage 5: pre-assemble and presolve for linear problems.
-            self._prepare_linear_matrix(variables)
+            if self.is_linear():
+                mtx = prepare_matrix(self, variables) # Updates materials.
+                self.try_presolve(mtx)
+                self.mtx_presolved = mtx
 
-            # Stage 6: build init/prestep/poststep callbacks (IO + hooks live
-            # here, keeping them isolated from the core solve orchestration).
-            init_fun, prestep_fun, poststep_fun = self._assemble_tss_functions(
+            init_fun, prestep_fun, poststep_fun = self.get_tss_functions(
                 update_bcs=update_bcs, update_materials=update_materials,
                 save_results=save_results,
                 step_hook=step_hook, post_process_hook=post_process_hook)
 
-            # Stage 7: drive the time-stepping/nonlinear solver.
-            vec = self._run_tss(tss, variables, init_fun, prestep_fun,
-                                poststep_fun, status, log_nls_status)
+            tss.set_dof_info(variables.adi)
+            vec = tss(variables.get_state(self.active_only, force=True),
+                      init_fun=init_fun,
+                      prestep_fun=prestep_fun,
+                      poststep_fun=poststep_fun,
+                      status=status,
+                      log_nls_status=log_nls_status)
 
-            # Stage 8: report collected statistics (time/step).
-            self._report_solve_status(status, report_nls_status,
-                                      verbose=verbose)
+            time_stats = status.get('time_stats')
+            if time_stats is not None:
+                output('====== time stats ======')
+                for key in time_stats.keys():
+                    output('%12s: %.8f [s]' % ('nls ' + key, time_stats[key]))
 
-            # Stage 9: apply final solution and run user finalization.
-            variables = self._finalize_solve(variables, vec,
-                                             post_process_hook_final)
-            return variables
+            if report_nls_status:
+                step_stats = status.get('step_stats')
+                if step_stats is not None:
+                    output('====== step stats ======')
+                    output.prefix, aux = '', output.prefix
+                    # output('  step, time,      cond,  nit, ls_nit,      err0,'
+                    output('  step,         time, cond,  nit, ls_nit,      err0,'
+                           '       err, elapsed [s]')  # 78 chars long
+                    if len(step_stats) > 1 and step_stats[0].get("step") > 0:
+                        s0 = IndexedStruct(step=0, step_time=0.0, condition=0,
+                                           n_iter=0, ls_n_iter=0,
+                                           err=0, err0=0, time=0)
+                        step_stats = [s0] + step_stats
 
-        return self._finalize_solve(variables, None, post_process_hook_final)
+                    for step in step_stats:
+                        msg = f'{step.get("step") + 1:6}, '
+                        msg += f'{step.get("step_time"):.6e}, '
+                        msg += f'{step.get("condition"):4}, '
+                        msg += f'{step.get("n_iter"):4}, '
+                        msg += f'{step.get("ls_n_iter"):6}, '
+                        msg += f'{step.get("err0"):.3e}, '
+                        msg += f'{step.get("err"):.3e}, '
+                        msg += f'{step.get("time"):.4f}'
+
+                        output(msg)
+                    output.prefix, aux = aux, output.prefix
+
+            output('solved in %d steps in %.2f seconds'
+                   % (status['n_step'], status['time']), verbose=verbose)
+
+            variables.set_state(vec, self.active_only)
+
+        if post_process_hook_final is not None: # User postprocessing.
+            post_process_hook_final(self, variables)
+
+        return variables
 
     def block_solve(self, state0=None, status=None, save_results=True,
                     step_hook=None, post_process_hook=None,
@@ -2387,7 +1984,7 @@ class Problem(Struct):
         else:
             conf_materials = self.conf.materials
 
-        materials = build_materials(conf_materials, self.functions)
+        materials = Materials.from_conf(conf_materials, self.functions)
 
         return materials
 
@@ -2419,7 +2016,7 @@ class Problem(Struct):
         else:
             conf_variables = self.conf.variables
 
-        variables = build_variables(conf_variables, self.fields)
+        variables = Variables.from_conf(conf_variables, self.fields)
 
         return variables
 
