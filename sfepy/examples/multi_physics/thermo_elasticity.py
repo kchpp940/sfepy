@@ -22,18 +22,12 @@ where
     \alpha_{ij} = (3 \lambda + 2 \mu) \alpha \delta_{ij}
 
 and :math:`\alpha` is the thermal expansion coefficient.
-
-The result export is driven declaratively via the ``export_config`` option:
-the derived quantities (strain, stresses, von Mises stress, physical
-temperature) are evaluated automatically on save, the output format and file
-name come from the same configuration.
 """
 import numpy as np
 
 from sfepy.base.base import Struct
 from sfepy.mechanics.matcoefs import stiffness_from_lame
 from sfepy.mechanics.tensors import get_von_mises_stress
-from sfepy.discrete.export_config import DerivedQuantity
 from sfepy import data_dir
 
 # Material parameters.
@@ -51,47 +45,49 @@ def get_temperature_load(ts, coors, region=None, **kwargs):
     x = coors[:, 0]
     return (x - x.min())**2 - T0
 
-def _von_mises_stress(data, problem, state, extend):
-    """Transform the total stress tensor into the von Mises scalar."""
-    vms = get_von_mises_stress(data.squeeze())
-    return vms.reshape((vms.shape[0], 1, 1, 1))
+def post_process(out, pb, state, extend=False):
+    """
+    Compute derived quantities: strain, stresses. Store also the loading
+    temperature.
+    """
+    ev = pb.evaluate
 
-def _physical_temperature(out, problem, state, extend):
-    """Store the temperature variable with the background level added back."""
-    val = problem.get_variables()['T']()
+    strain = ev('ev_cauchy_strain.2.Omega( u )', mode='el_avg')
+    out['cauchy_strain'] = Struct(name='output_data',
+                                  mode='cell', data=strain,
+                                  dofs=None)
+
+    e_stress = ev('ev_cauchy_stress.2.Omega( solid.D, u )', mode='el_avg')
+    out['elastic_stress'] = Struct(name='output_data',
+                                   mode='cell', data=e_stress,
+                                   dofs=None)
+
+    t_stress = ev('ev_biot_stress.2.Omega( solid.alpha, T )', mode='el_avg')
+    out['thermal_stress'] = Struct(name='output_data',
+                                   mode='cell', data=t_stress,
+                                   dofs=None)
+
+    out['total_stress'] = Struct(name='output_data',
+                                 mode='cell', data=e_stress + t_stress,
+                                 dofs=None)
+
+    out['von_mises_stress'] = aux = out['total_stress'].copy()
+    vms = get_von_mises_stress(aux.data.squeeze())
+    vms.shape = (vms.shape[0], 1, 1, 1)
+    out['von_mises_stress'].data = vms
+
+    val = pb.get_variables()['T']()
     val.shape = (val.shape[0], 1)
     out['T'] = Struct(name='output_data',
                       mode='vertex', data=val + T0,
                       dofs=None)
     return out
 
-def _total_stress(data, problem, state, extend):
-    """Sum the elastic and thermal contributions to the total stress."""
-    t_stress = problem.evaluate(
-        'ev_biot_stress.2.Omega( solid.alpha, T )', mode='el_avg'
-    )
-    return data + t_stress
-
 options = {
+    'post_process_hook' : 'post_process',
+
     'nls' : 'newton',
     'ls' : 'ls',
-    'export_config': {
-        'variable_names': ['u'],
-        'derived_quantities': [
-            ('cauchy_strain', 'ev_cauchy_strain.2.Omega(u)'),
-            ('elastic_stress',
-             'ev_cauchy_stress.2.Omega(solid.D, u)'),
-            ('thermal_stress',
-             'ev_biot_stress.2.Omega(solid.alpha, T)'),
-            ('total_stress',
-             'ev_cauchy_stress.2.Omega(solid.D, u)',
-             {'transform': _total_stress}),
-            ('von_mises_stress',
-             'ev_cauchy_stress.2.Omega(solid.D, u)',
-             {'transform': _von_mises_stress}),
-            DerivedQuantity('T', _physical_temperature),
-        ],
-    },
 }
 
 functions = {

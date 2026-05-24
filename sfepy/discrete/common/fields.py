@@ -3,6 +3,7 @@ import numpy as nm
 
 from sfepy.base.base import output, iter_dict_of_lists, Struct, assert_
 from sfepy.base.timing import Timer
+from sfepy.discrete.region_aliases import resolve_alias_region_name
 from sfepy.mechanics.tensors import get_cauchy_strain
 
 
@@ -68,10 +69,10 @@ def setup_extra_data(conn_info):
             if var == info.primary:
                 field.setup_extra_data(info)
 
-def fields_from_conf(conf, regions):
+def fields_from_conf(conf, regions, aliases=None):
     fields = {}
     for key, val in conf.items():
-        field = Field.from_conf(val, regions)
+        field = Field.from_conf(val, regions, aliases=aliases)
         fields[field.name] = field
 
     return fields
@@ -119,7 +120,7 @@ class Field(Struct):
         return Field.from_conf(conf, {region.name : region})
 
     @staticmethod
-    def from_conf(conf, regions):
+    def from_conf(conf, regions, aliases=None):
         """
         Create a Field subclass instance based on the configuration.
         """
@@ -151,7 +152,11 @@ class Field(Struct):
         if poly_space_basis == 'constant':
             discontinuous = False
 
-        region = regions[conf.region]
+        region_name = conf.region
+        if aliases is not None:
+            region_name = resolve_alias_region_name(
+                region_name, aliases, regions=regions)
+        region = regions[region_name]
 
         if region.kind == 'cell':
             # Volume fields.

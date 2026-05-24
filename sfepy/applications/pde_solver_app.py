@@ -102,8 +102,6 @@ class PDESolverApp(Application):
         Application options setup. Sets default values for missing
         non-compulsory options.
         """
-        from sfepy.discrete.export_config import ResultExportConfig
-
         get = options.get
 
         output_dir = get('output_dir', '.')
@@ -130,12 +128,7 @@ class PDESolverApp(Application):
                                                   None),
                       # Called in init process.
                       pre_process_hook=get('pre_process_hook', None),
-                      use_equations=get('use_equations', 'equations'),
-                      # Declarative result export description.  Accepted as a
-                      # dict or a :class:`ResultExportConfig` instance.
-                      export_config=ResultExportConfig.from_conf(
-                          get('export_config', None)),
-                      )
+                      use_equations=get('use_equations', 'equations'))
 
     def __init__(self, conf, options, output_prefix,
                  init_equations=True, **kwargs):
@@ -154,24 +147,6 @@ class PDESolverApp(Application):
 
     def setup_options( self ):
         self.app_options = PDESolverApp.process_options(self.conf.options)
-
-        # If the problem file does not define an ``export_config`` inside
-        # ``options``, look for a top-level ``export_config`` attribute.  This
-        # allows problem files to declare the export description either as a
-        # dict inside ``options`` or as a top-level ``ResultExportConfig``
-        # object (useful when the configuration contains callable
-        # transforms).
-        from sfepy.discrete.export_config import ResultExportConfig
-        if self.app_options.export_config is None \
-                and hasattr(self.conf, 'export_config'):
-            self.app_options.export_config = ResultExportConfig.from_conf(
-                self.conf.export_config)
-
-        # Propagate the (possibly resolved) export configuration back into
-        # the problem options so Problem.solve() / Problem.save_state() can
-        # pick it up without explicit user arguments.
-        if self.app_options.export_config is not None:
-            self.conf.options.export_config = self.app_options.export_config
 
         assign_standard_hooks(self, self.app_options.get, self.conf)
 
@@ -205,16 +180,6 @@ class PDESolverApp(Application):
         else:
             ofn_trunk = options.output_filename_trunk
 
-        # Let the export_config override the output filename and format.
-        export_cfg = self.app_options.export_config
-        if export_cfg is not None:
-            if export_cfg.filename is not None:
-                ofn_trunk = export_cfg.resolve_filename(
-                    problem_trunk=ofn_trunk,
-                )
-            if export_cfg.file_format is not None:
-                options.output_format = export_cfg.file_format
-
         if hasattr(options, 'output_format') \
                and (options.output_format is not None):
             output_format = options.output_format
@@ -222,17 +187,12 @@ class PDESolverApp(Application):
         else:
             output_format = self.app_options.output_format
 
-        split_results_by = self.app_options.split_results_by
-        if export_cfg is not None \
-                and split_results_by is None:
-            split_results_by = export_cfg.get_split_results_by()
-
         problem.setup_output(
             output_filename_trunk=ofn_trunk,
             output_dir=self.app_options.output_dir,
             output_format=output_format,
             file_format=self.app_options.file_format,
-            split_results_by=split_results_by,
+            split_results_by=self.app_options.split_results_by,
             linearization=self.app_options.linearization)
 
     def call(self, status=None):
