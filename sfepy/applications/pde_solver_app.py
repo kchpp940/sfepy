@@ -1,6 +1,7 @@
 import os
 
 from sfepy.base.base import output, dict_to_struct, Struct
+from sfepy.base.cli import build_app_options
 from sfepy.base.conf import ProblemConf, get_standard_keywords
 import sfepy.base.ioutils as io
 from sfepy.discrete import Problem
@@ -43,12 +44,7 @@ def solve_pde(conf, define_args=None, options=None, status=None, **app_options):
         output_prefix = output.prefix
 
     if options is None:
-        options = Struct(output_filename_trunk=None,
-                         save_ebc=False,
-                         save_ebc_nodes=False,
-                         save_regions=False,
-                         save_regions_as_groups=False,
-                         solve_not=False)
+        options = build_app_options()
 
     if conf.options.get('evps') is None:
         app = PDESolverApp(conf, options, output_prefix)

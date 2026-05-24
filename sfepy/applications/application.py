@@ -1,5 +1,6 @@
 from sfepy.base.base import Struct, output, insert_as_static_method
 
+
 class Application(Struct):
     """
     Base class for applications.

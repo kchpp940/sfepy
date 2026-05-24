@@ -40,11 +40,17 @@ of the element. To obtain some values even in this case, try increasing the
 --close-limit option value.
 """
 import os
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
 
 import numpy as nm
 
-import sfepy
+from sfepy.base.cli import (
+    build_parser,
+    setup_debug,
+    configure_output,
+    parse_comma_list,
+    build_app_options,
+    run_main,
+)
 from sfepy.base.base import output, assert_
 from sfepy.base.ioutils import edit_filename
 from sfepy.base.conf import ProblemConf, get_standard_keywords
@@ -53,8 +59,6 @@ from sfepy.discrete.fem import MeshIO
 from sfepy.discrete.probes import write_results, read_results
 
 helps = {
-    'debug':
-    'automatically start debugger when an exception is raised',
     'filename' :
     'basename of output file(s) [default: <basename of input file>]',
     'output_format' :
@@ -77,6 +81,7 @@ helps = {
     'radial' :
     'assume radial integration',
 }
+
 
 def generate_probes(filename_input, filename_results, options,
                     conf=None, problem=None, probes=None, labels=None,
@@ -148,7 +153,6 @@ def generate_probes(filename_input, filename_results, options,
 
             if key is not None:
                 filename = filename_template % (key, ip)
-
             else:
                 filename = filename_template % ip
 
@@ -171,6 +175,7 @@ def generate_probes(filename_input, filename_results, options,
 
                 output('data ->', os.path.normpath(txt_filename))
 
+
 def integrate_along_line(x, y, is_radial=False):
     r"""
     Integrate numerically (trapezoidal rule) a function :math:`y=y(x)`.
@@ -188,6 +193,7 @@ def integrate_along_line(x, y, is_radial=False):
         val = nm.sum(ay * dx)
 
     return val
+
 
 def postprocess(filename_input, filename_results, options):
     """
@@ -224,14 +230,9 @@ def postprocess(filename_input, filename_results, options):
 
     fig.savefig(filename_results)
 
-def main():
-    parser = ArgumentParser(description=__doc__,
-                            formatter_class=RawDescriptionHelpFormatter)
-    parser.add_argument('--version', action='version',
-                        version='%(prog)s ' + sfepy.__version__)
-    parser.add_argument('--debug',
-                        action='store_true', dest='debug',
-                        default=False, help=helps['debug'])
+
+def _build_parser():
+    parser = build_parser(description=__doc__)
     parser.add_argument('-o', metavar='filename',
                         action='store', dest='output_filename_trunk',
                         default=None, help=helps['filename'])
@@ -261,23 +262,35 @@ def main():
                         default=False, help=helps['radial'])
     parser.add_argument('filename_in')
     parser.add_argument('filename_out')
+    return parser
+
+
+def main():
+    parser = _build_parser()
     options = parser.parse_args()
 
-    if options.debug:
-        from sfepy.base.base import debug_on_error; debug_on_error()
+    setup_debug(options)
+    configure_output(options, prefix='probe:')
 
     filename_input = options.filename_in
     filename_results = options.filename_out
 
-    if options.only_names is not None:
-        options.only_names = options.only_names.split(',')
+    options.only_names = parse_comma_list(options.only_names)
 
-    output.prefix = 'probe:'
+    app_opts = build_app_options(**vars(options))
+    app_opts.auto_dir = options.auto_dir
+    app_opts.same_dir = options.same_dir
+    app_opts.only_names = options.only_names
+    app_opts.step = options.step
+    app_opts.close_limit = options.close_limit
+    app_opts.postprocess = options.postprocess
+    app_opts.radial = options.radial
 
-    if options.postprocess:
-        postprocess(filename_input, filename_results, options)
+    if app_opts.postprocess:
+        postprocess(filename_input, filename_results, app_opts)
     else:
-        generate_probes(filename_input, filename_results, options)
+        generate_probes(filename_input, filename_results, app_opts)
+
 
 if __name__ == '__main__':
-    main()
+    run_main(main)

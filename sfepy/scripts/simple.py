@@ -40,10 +40,15 @@ Both normal and parametric study runs are supported. A parametric study allows
 repeated runs for varying some of the simulation parameters - see
 ``sfepy/examples/diffusion/poisson_parametric_study.py`` file.
 """
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
-
-import sfepy
-from sfepy.base.base import output, Struct
+from sfepy.base.cli import (
+    build_parser,
+    add_logging_args,
+    configure_output,
+    setup_debug,
+    build_app_options,
+    run_main,
+)
+from sfepy.base.base import output
 from sfepy.base.conf import ProblemConf, get_standard_keywords
 from sfepy.applications import PDESolverApp, EVPSolverApp
 
@@ -68,8 +73,6 @@ helps = {
     '         homogenized coefficients computed in parallel using MPI),'
     ' evp (eigenvalue problem),'
     ' phonon (phononic band gaps)',
-    'debug':
-    'automatically start debugger when an exception is raised',
     'debug_mpi': 'log MPI communication (mM mode only)',
     'conf' :
     'override problem description file items, written as python'
@@ -87,10 +90,6 @@ helps = {
     'if given, save restart files according to the given mode.',
     'load_restart' :
     'if given, load the given restart file',
-    'log' :
-    'log all messages to specified file (existing file will be overwritten!)',
-    'quiet' :
-    'do not print any messages to screen',
     'save_ebc' :
     'save a zero solution with applied EBCs (Dirichlet boundary conditions)',
     'save_ebc_nodes' :
@@ -117,23 +116,18 @@ helps = {
     'list data, what can be one of: {terms, solvers}',
 }
 
-def main():
-    parser = ArgumentParser(description=__doc__,
-                            formatter_class=RawDescriptionHelpFormatter)
-    parser.add_argument('--version', action='version',
-                        version='%(prog)s ' + sfepy.__version__)
+
+def _build_parser():
+    parser = build_parser(description=__doc__)
     parser.add_argument('-a', '--app', action='store', dest='app',
                         choices=['bvp', 'homogen', 'bvp-mM', 'evp', 'phonon'],
-                        default=None, help= helps['app'])
-    parser.add_argument('--debug',
-                        action='store_true', dest='debug',
-                        default=False, help=helps['debug'])
+                        default=None, help=helps['app'])
     parser.add_argument('--debug-mpi',
                         action='store_true', dest='debug_mpi',
                         default=False, help=helps['debug_mpi'])
     parser.add_argument('-c', '--conf', metavar='"key : value, ..."',
                         action='store', dest='conf', type=str,
-                        default=None, help= helps['conf'])
+                        default=None, help=helps['conf'])
     parser.add_argument('-O', '--options', metavar='"key : value, ..."',
                         action='store', dest='app_options', type=str,
                         default=None, help=helps['options'])
@@ -152,12 +146,7 @@ def main():
     parser.add_argument('--load-restart', metavar='filename',
                         action='store', dest='load_restart',
                         default=None, help=helps['load_restart'])
-    parser.add_argument('--log', metavar='file',
-                        action='store', dest='log',
-                        default=None, help=helps['log'])
-    parser.add_argument('-q', '--quiet',
-                        action='store_true', dest='quiet',
-                        default=False, help=helps['quiet'])
+    add_logging_args(parser, prefix='sfepy:')
     parser.add_argument('--save-ebc',
                         action='store_true', dest='save_ebc',
                         default=False, help=helps['save_ebc'])
@@ -187,30 +176,30 @@ def main():
                         default=False, help=helps['phase_velocity'])
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--list', metavar='what',
-                        action='store', dest='_list',
-                        default=None, help=helps['list'])
+                       action='store', dest='_list',
+                       default=None, help=helps['list'])
     group.add_argument('filename_in', nargs='?')
+    return parser
+
+
+def main():
+    parser = _build_parser()
     options, petsc_opts = parser.parse_known_args()
 
     if options._list is not None:
         if options._list == 'terms':
             print_terms()
-
         elif options._list == 'solvers':
             print_solvers()
-
         return
 
     if not (options.analyze_dispersion or options.detect_band_gaps):
             options.plot = False
 
-    if options.debug:
-        from sfepy.base.base import debug_on_error; debug_on_error()
+    setup_debug(options)
 
     filename_in = options.filename_in
-    output.set_output(filename=options.log,
-                      quiet=options.quiet,
-                      combined=options.log is not None)
+    configure_output(options)
 
     required, other = get_standard_keywords()
     required.remove('equations')
@@ -228,37 +217,35 @@ def main():
                                              define_args=options.define_args)
     if conf.options.get('coefs') is None:
         if conf.get('equations') is None:
-            ValueError('required missing: equations')
+            raise ValueError('required missing: equations')
 
     app_mode = options.app
     if app_mode is None:
         if conf.options.get('coefs') is not None:
             if 'band_gaps' in conf.get(conf.options.coefs).keys():
                 app_mode = 'phonon'
-
             else:
                 app_mode = 'homogen'
-
         elif conf.options.get('evps') is not None:
             app_mode = 'evp'
-
         else:
             app_mode = 'bvp'
 
     opts = conf.options
-
     opts.save_restart = options.save_restart
     opts.load_restart = options.load_restart
 
+    app_opts = build_app_options(**vars(options))
+
     if app_mode == 'bvp':
         output_prefix = opts.get('output_prefix', 'sfepy:')
-        app = PDESolverApp(conf, options, output_prefix)
+        app = PDESolverApp(conf, app_opts, output_prefix)
 
     elif app_mode == 'homogen':
         from sfepy.homogenization.homogen_app import HomogenizationApp
 
         output_prefix = opts.get('output_prefix', 'homogen:')
-        app = HomogenizationApp(conf, options, output_prefix)
+        app = HomogenizationApp(conf, app_opts, output_prefix)
 
     elif app_mode == 'bvp-mM':
         import sfepy.base.multiproc_mpi as multi_mpi
@@ -270,9 +257,8 @@ def main():
             nslaves = multi_mpi.cpu_count() - 1
             opts.n_mpi_homog_slaves = nslaves
             output_prefix = opts.get('output_prefix', 'sfepy:')
-
-            app = PDESolverApp(conf, options, output_prefix)
-            if hasattr(opts, 'parametric_hook'):  # Parametric study.
+            app = PDESolverApp(conf, app_opts, output_prefix)
+            if hasattr(opts, 'parametric_hook'):
                 parametric_hook = conf.get_function(opts.parametric_hook)
                 app.parametrize(parametric_hook)
             app()
@@ -281,14 +267,13 @@ def main():
             return
 
         else:
-            # MPI slave mode - calculate homogenized coefficients
             homogen_app = None
             done = False
             rank = multi_mpi.mpi_rank
             while not done:
                 task, data = multi_mpi.slave_get_task('main slave loop')
 
-                if task == 'init':  # data: micro_file, n_micro
+                if task == 'init':
                     output.set_output(filename='homog_app_mpi_%d.log' % rank,
                                       quiet=True)
                     micro_file, n_micro = data[:2]
@@ -296,10 +281,10 @@ def main():
                     required.remove('equations')
                     conf = ProblemConf.from_file(micro_file, required, other,
                                                  verbose=False)
-                    options = Struct(output_filename_trunk=None)
-                    homogen_app = HomogenizationApp(conf, options, 'micro:',
+                    micro_opts = build_app_options()
+                    homogen_app = HomogenizationApp(conf, micro_opts, 'micro:',
                                                     n_micro=n_micro)
-                elif task == 'calculate':  # data: rel_def_grad, ts, iteration
+                elif task == 'calculate':
                     macro_data, ts, iteration = data[:3]
                     homogen_app.setup_macro_data(macro_data)
                     homogen_app(ret_all=True, itime=ts.step, iiter=iteration)
@@ -309,18 +294,19 @@ def main():
 
     elif app_mode == 'evp':
         output_prefix = opts.get('output_prefix', 'sfepy:')
-        app = EVPSolverApp(conf, options, output_prefix)
+        app = EVPSolverApp(conf, app_opts, output_prefix)
 
     elif app_mode == 'phonon':
         from sfepy.homogenization.band_gaps_app import AcousticBandGapsApp
 
         output_prefix = opts.get('output_prefix', 'phonon:')
-        app = AcousticBandGapsApp(conf, options, output_prefix)
+        app = AcousticBandGapsApp(conf, app_opts, output_prefix)
 
-    if hasattr(opts, 'parametric_hook'): # Parametric study.
+    if hasattr(opts, 'parametric_hook'):
         parametric_hook = conf.get_function(opts.parametric_hook)
         app.parametrize(parametric_hook)
     app()
 
+
 if __name__ == '__main__':
-    main()
+    run_main(main)

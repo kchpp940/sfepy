@@ -5,10 +5,15 @@ Convert a mesh file from one SfePy-supported format to another.
 import sys
 import os.path as op
 from ast import literal_eval
-sys.path.append('.')
 
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
-from sfepy.base.base import nm, output
+import numpy as nm
+
+from sfepy.base.cli import (
+    build_parser,
+    run_main,
+    fatal,
+)
+from sfepy.base.base import output
 from sfepy.base.ioutils import remove_files
 from sfepy.discrete.fem import Mesh, FEDomain
 from sfepy.discrete.fem.meshio import output_mesh_formats
@@ -107,6 +112,7 @@ helps = {
       a normal vector. Example: --mirror='p[-0.5,-0.2,0] v[0,1,0]'""",
 }
 
+
 def _parse_val_or_vec(option, name, parser):
     if option is not None:
         try:
@@ -116,9 +122,7 @@ def _parse_val_or_vec(option, name, parser):
                 option = [float(ii) for ii in option.split(',')]
             option = nm.array(option, dtype=nm.float64, ndmin=1)
         except:
-            output('bad %s! (%s)' % (name, option))
-            parser.print_help()
-            sys.exit(1)
+            fatal('bad %s! (%s)' % (name, option))
 
     return option
 
@@ -137,9 +141,8 @@ def _parse_fun_args(s, args_tab):
     return args, dargs
 
 
-def main():
-    parser = ArgumentParser(description=__doc__,
-                            formatter_class=RawDescriptionHelpFormatter)
+def _build_parser():
+    parser = build_parser(description=__doc__, add_common=False)
     parser.add_argument('-s', '--scale', metavar='scale',
                         action='store', dest='scale',
                         default=None, help=helps['scale'])
@@ -214,6 +217,11 @@ def main():
                         default=None, help=helps['mirror'])
     parser.add_argument('filename_in')
     parser.add_argument('filename_out')
+    return parser
+
+
+def main():
+    parser = _build_parser()
     options = parser.parse_args()
 
     if options.list:
@@ -224,7 +232,7 @@ def main():
         output('Supported writable mesh formats:')
         output('--------------------------------')
         output_mesh_formats('w')
-        sys.exit(0)
+        return
 
     scale = _parse_val_or_vec(options.scale, 'scale', parser)
     center = _parse_val_or_vec(options.center, 'center', parser)
@@ -235,7 +243,6 @@ def main():
             y=[0.0, 1.0, 0.0],
             z=[0.0, 0.0, 1.0],
         )[options.rot_axis]
-
     else:
         rot_axis = _parse_val_or_vec(options.rot_axis, 'rot_axis', parser)
 
@@ -269,7 +276,7 @@ def main():
             shutil.copy(filename_in, dirname)
             filename = op.join(dirname, op.basename(filename_in))
 
-        qopts = ''.join(options.remesh.split()) # Remove spaces.
+        qopts = ''.join(options.remesh.split())
         command = 'tetgen -BFENkACp%s %s' % (qopts, filename)
         args = shlex.split(command)
         subprocess.call(args)
@@ -361,7 +368,7 @@ def main():
         for mat_id in mat_ids:
             idxs = nm.where(cgroups == mat_id)[0]
             imesh = Mesh.from_data(mesh.name + '_matid_%d' % mat_id,
-                                   coors, ngroups,
+                                   coor, ngroups,
                                    [conns[idxs]], [cgroups[idxs]], [desc])
 
             fbase, fext = op.splitext(filename_out)
@@ -462,5 +469,6 @@ def main():
         mesh.write(filename_out, file_format=options.format, binary=False)
         output('...done')
 
+
 if __name__ == '__main__':
-    main()
+    run_main(main)
