@@ -302,9 +302,7 @@ class AcousticBandGapsApp(HomogenizationApp):
 
         self.setup_options()
 
-        if self.output_manager is not None:
-            self.output_manager.save_config(conf._filename)
-        elif conf._filename:
+        if conf._filename:
             output_dir = self.problem.output_dir
             shutil.copyfile(conf._filename,
                             op.join(output_dir, op.basename(conf._filename)))
@@ -388,12 +386,7 @@ class AcousticBandGapsApp(HomogenizationApp):
 
         coefs = Coefficients(**coefs.to_dict())
 
-        if self.output_manager is not None:
-            coefs_filename = self.output_manager.get_path(
-                opts.coefs_filename)
-        else:
-            coefs_filename = op.join(opts.output_dir, opts.coefs_filename)
-
+        coefs_filename = op.join(opts.output_dir, opts.coefs_filename)
         coefs.to_file_txt(coefs_filename + '.txt',
                           opts.tex_names,
                           opts.float_format)
@@ -405,20 +398,12 @@ class AcousticBandGapsApp(HomogenizationApp):
             bg = coefs.get(key)
             log_save_name = bg.get('log_save_name', None)
             if log_save_name is not None:
-                if self.output_manager is not None:
-                    filename = self.output_manager.get_path(log_save_name)
-                else:
-                    filename = op.join(self.problem.output_dir, log_save_name)
+                filename = op.join(self.problem.output_dir, log_save_name)
                 bg.save_log(filename, opts.float_format, bg)
 
             raw_log_save_name = bg.get('raw_log_save_name', None)
             if raw_log_save_name is not None:
-                if self.output_manager is not None:
-                    filename = self.output_manager.get_path(
-                        raw_log_save_name)
-                else:
-                    filename = op.join(self.problem.output_dir,
-                                       raw_log_save_name)
+                filename = op.join(self.problem.output_dir, raw_log_save_name)
                 save_raw_bg_logs(filename, bg.logs)
 
         if options.plot:
@@ -472,15 +457,9 @@ class AcousticBandGapsApp(HomogenizationApp):
             plt.tight_layout()
 
             if opts.fig_name is not None:
-                name = key.replace('band_gaps', '')
-                if name and (not name.startswith('_')):
-                    name = '_' + name
-                fig_name = opts.fig_name + name + opts.fig_suffix
-                if self.output_manager is not None:
-                    fig_path = self.output_manager.get_path(fig_name)
-                else:
-                    fig_path = op.join(self.problem.output_dir, fig_name)
-                fig.savefig(fig_path)
+                fig_name = _get_fig_name(self.problem.output_dir, opts.fig_name,
+                                         key, 'band_gaps', opts.fig_suffix)
+                fig.savefig(fig_name)
 
     def plot_dispersion(self, coefs):
         opts = self.app_options
@@ -522,15 +501,9 @@ class AcousticBandGapsApp(HomogenizationApp):
 
             fig_name = opts.fig_name_angle
             if fig_name is not None:
-                name = key.replace('dispersion', '')
-                if name and (not name.startswith('_')):
-                    name = '_' + name
-                fig_name = fig_name + name + opts.fig_suffix
-                if self.output_manager is not None:
-                    fig_path = self.output_manager.get_path(fig_name)
-                else:
-                    fig_path = op.join(self.problem.output_dir, fig_name)
-                fig_1.savefig(fig_path)
+                fig_name = _get_fig_name(self.problem.output_dir, fig_name,
+                                         key, 'dispersion', opts.fig_suffix)
+                fig_1.savefig(fig_name)
 
             aux = transform_plot_data(bg.logs.eigs,
                                       opts.plot_transform_wave,

@@ -49,8 +49,17 @@ from ast import literal_eval
 import numpy as nm
 import os.path as osp
 
-import pyvista as pv
-from vtk.util.numpy_support import numpy_to_vtk
+from sfepy.base.deps import (dep_manager, DependencyMissingError,  # noqa: E402
+                            fatal_dependency_error)
+
+pv = dep_manager.optional_import('pyvista')
+if pv is None:
+    # pyvista is missing; surface a clear error as soon as anything tries
+    # to use this module (usually from __main__ below).
+    pv = None
+    numpy_to_vtk = None
+else:
+    from vtk.util.numpy_support import numpy_to_vtk
 
 cache = {}
 
@@ -171,10 +180,13 @@ def read_mesh(filenames, step=None, print_info=True, ret_n_steps=False,
         ftime, mesh = cache[key]
         cache['n_steps'] = len(filenames)
     elif ext in ['.xdmf', '.xdmf3']:
-        import meshio
+        from sfepy.base.deps import dep_manager
+        meshio = dep_manager.require(
+            'meshio',
+            context='resview: meshio is required to read XDMF files',
+        )
         try:
             from meshio._common import meshio_to_vtk_type
-
         except ImportError:
             from meshio._vtk_common import meshio_to_vtk_type
 
@@ -1209,4 +1221,13 @@ def main():
             print(f'saved: {options.screenshot}')
 
 if __name__ == '__main__':
-    main()
+    try:
+        if pv is None:
+            dep_manager.require(
+                'pyvista',
+                context='resview: pyvista (with its VTK backend) is required '
+                        'to view results',
+            )
+        main()
+    except DependencyMissingError as exc:
+        fatal_dependency_error(exc)

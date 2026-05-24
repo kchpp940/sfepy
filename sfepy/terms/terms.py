@@ -6,9 +6,16 @@ import numpy as nm
 from sfepy.base.base import (as_float_or_complex, get_default, assert_,
                              Container, Struct, goptions)
 from sfepy.base.compat import in1d
+from sfepy.base.deps import dep_manager
 
 # Used for imports in term files.
-from sfepy.terms.extmods import terms
+try:
+    from sfepy.terms.extmods import terms  # noqa: F401
+except (ImportError, AttributeError) as exc:
+    dep_manager.require(
+        'c-ext-terms.terms',
+        context='sfepy.terms import failed: %s' % exc,
+    )
 
 _match_args = re.compile(r'^([^\(\}]*)\((.*)\)$').match
 _match_virtual = re.compile('^virtual$').match

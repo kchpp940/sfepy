@@ -200,4 +200,10 @@ def main():
         plt.show()
 
 if __name__ == '__main__':
-    main()
+    from sfepy.base.deps import (DependencyMissingError,
+                                fatal_dependency_error)
+
+    try:
+        main()
+    except DependencyMissingError as exc:
+        fatal_dependency_error(exc)

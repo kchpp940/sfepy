@@ -2,6 +2,7 @@
 
 import vtk
 import os
+import tempfile
 
 vtk_version = vtk.vtkVersion().GetVTKMajorVersion()
 
@@ -51,17 +52,12 @@ def write_vtk_to_file(filename, vtkdata):
     writer.Update()
 
 def get_vtk_from_mesh(mesh, data, prefix=''):
-    from sfepy.base.output_manager import TempManager
-
     mesh_name = mesh.name[mesh.name.rfind(os.path.sep) + 1:]
-    tmpdir = TempManager.gettempdir()
-    fd, vtkname = TempManager.mkstemp(prefix='%s%s_' % (prefix, mesh_name),
-                                       suffix='.vtk')
-    os.close(fd)
+    tmpdir = tempfile.gettempdir()
+    vtkname = os.path.join(tmpdir, '%s%s.vtk' % (prefix, mesh_name))
     mesh.write(vtkname, io='auto', out=data)
     vtkdata = get_vtk_from_file(vtkname)
     os.remove(vtkname)
-    TempManager.unregister_file(vtkname)
 
     return vtkdata
 

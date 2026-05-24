@@ -48,7 +48,6 @@ import sfepy
 from sfepy.base.base import output, assert_
 from sfepy.base.ioutils import edit_filename
 from sfepy.base.conf import ProblemConf, get_standard_keywords
-from sfepy.base.output_manager import create_output_manager_from_conf
 from sfepy.discrete import Problem
 from sfepy.discrete.fem import MeshIO
 from sfepy.discrete.probes import write_results, read_results
@@ -77,9 +76,6 @@ helps = {
     'postprocessing mode',
     'radial' :
     'assume radial integration',
-    'output_conflict' :
-    'how to handle existing output files: increment (default),'
-    ' overwrite, or error',
 }
 
 def generate_probes(filename_input, filename_results, options,
@@ -94,18 +90,9 @@ def generate_probes(filename_input, filename_results, options,
 
     opts = conf.options
 
-    output_manager = create_output_manager_from_conf(conf, options)
-
-    if output_manager is not None:
-        output_manager.conflict_strategy = options.output_conflict
-        if options.auto_dir:
-            output_dir = output_manager.get_output_dir()
-            filename_results = os.path.join(output_dir,
-                                            os.path.basename(filename_results))
-    else:
-        if options.auto_dir:
-            output_dir = opts.get_('output_dir', '.')
-            filename_results = os.path.join(output_dir, filename_results)
+    if options.auto_dir:
+        output_dir = opts.get_('output_dir', '.')
+        filename_results = os.path.join(output_dir, filename_results)
 
     output('results in: %s' % filename_results)
 
@@ -170,46 +157,19 @@ def generate_probes(filename_input, filename_results, options,
                     for fig_name, fig_fig in fig.items():
                         fig_filename = edit_filename(filename,
                                                      suffix='_' + fig_name)
-                        fig_filename = _apply_conflict_strategy(
-                            fig_filename, options.output_conflict)
                         fig_fig.savefig(fig_filename)
                         output('figure ->', os.path.normpath(fig_filename))
 
                 else:
-                    filename = _apply_conflict_strategy(
-                        filename, options.output_conflict)
                     fig.savefig(filename)
                     output('figure ->', os.path.normpath(filename))
 
             if results is not None:
                 txt_filename = edit_filename(filename, new_ext='.txt')
-                txt_filename = _apply_conflict_strategy(
-                    txt_filename, options.output_conflict)
+
                 write_results(txt_filename, probe, results)
 
                 output('data ->', os.path.normpath(txt_filename))
-
-def _apply_conflict_strategy(filename, conflict_strategy):
-    """Apply the conflict strategy to a filename that already exists."""
-    import os.path as op
-
-    if not op.exists(filename):
-        return filename
-
-    if conflict_strategy == 'error':
-        raise OSError(
-            'output file already exists: %s'
-            ' (use --output-conflict=overwrite or'
-            ' increment to proceed)' % filename)
-
-    elif conflict_strategy == 'increment':
-        base, ext = op.splitext(filename)
-        counter = 1
-        while op.exists(filename):
-            filename = '%s_%03d%s' % (base, counter, ext)
-            counter += 1
-
-    return filename
 
 def integrate_along_line(x, y, is_radial=False):
     r"""
@@ -234,9 +194,6 @@ def postprocess(filename_input, filename_results, options):
     Postprocess probe data files - replot, integrate data.
     """
     from matplotlib import pyplot as plt
-
-    filename_results = _apply_conflict_strategy(filename_results,
-                                            options.output_conflict)
 
     header, results = read_results(filename_input,
                                    only_names=options.only_names)
@@ -302,10 +259,6 @@ def main():
     parser.add_argument('--radial',
                         action='store_true', dest='radial',
                         default=False, help=helps['radial'])
-    parser.add_argument('--output-conflict', metavar='strategy',
-                        action='store', dest='output_conflict',
-                        choices=['increment', 'overwrite', 'error'],
-                        default='increment', help=helps['output_conflict'])
     parser.add_argument('filename_in')
     parser.add_argument('filename_out')
     options = parser.parse_args()
@@ -327,4 +280,10 @@ def main():
         generate_probes(filename_input, filename_results, options)
 
 if __name__ == '__main__':
-    main()
+    from sfepy.base.deps import (DependencyMissingError,
+                                fatal_dependency_error)
+
+    try:
+        main()
+    except DependencyMissingError as exc:
+        fatal_dependency_error(exc)

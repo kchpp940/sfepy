@@ -4,7 +4,16 @@ Reference mappings for isogeometric analysis.
 import numpy as nm
 
 from sfepy.discrete.common.mappings import Mapping, PyCMapping
-import sfepy.discrete.iga.extmods.igac as iga
+from sfepy.base.deps import dep_manager
+
+# Import compiled IGA helpers through the central registry.
+try:
+    import sfepy.discrete.iga.extmods.igac as iga  # noqa: F401
+except (ImportError, AttributeError) as exc:
+    dep_manager.require(
+        'c-ext-iga',
+        context='sfepy.discrete.iga.mappings import failed: %s' % exc,
+    )
 
 
 class IGMapping(Mapping):

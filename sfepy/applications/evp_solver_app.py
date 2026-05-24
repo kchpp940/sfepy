@@ -45,20 +45,14 @@ class EVPSolverApp(PDESolverApp):
         Setup various file names for the output directory given by
         `self.problem.output_dir`.
         """
-        opts = self.app_options
+        output_dir = self.problem.output_dir
 
-        if self.output_manager is not None:
-            opts.output_dir = self.output_manager.get_output_dir()
-            self.mesh_results_name = self.problem.get_output_name()
-            self.eig_results_name = self.output_manager.get_path(
-                'eigs', 'txt')
-        else:
-            output_dir = self.problem.output_dir
-            opts.output_dir = output_dir
-            self.mesh_results_name = self.problem.get_output_name()
-            self.eig_results_name = os.path.join(opts.output_dir,
-                                                 self.problem.ofn_trunk
-                                                 + '_eigs.txt')
+        opts = self.app_options
+        opts.output_dir = output_dir
+        self.mesh_results_name = self.problem.get_output_name()
+        self.eig_results_name = os.path.join(opts.output_dir,
+                                             self.problem.ofn_trunk
+                                             + '_eigs.txt')
 
     def call(self, status=None):
         # This cannot be in __init__(), as parametric calls may change

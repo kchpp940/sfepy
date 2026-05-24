@@ -1,11 +1,21 @@
 import numpy as nm
 
 from sfepy.base.base import assert_
+from sfepy.base.deps import dep_manager
 from sfepy.terms.terms import Term, terms
 from sfepy.linalg import dot_sequences
 from sfepy.mechanics.contact_bodies import ContactPlane, ContactSphere
 from sfepy.mechanics.tensors import get_full_indices
-from sfepy.discrete.common.extmods._geommech import geme_mulAVSB3py
+
+# Import the compiled geometry helpers through the central registry so
+# that a missing C extension produces a consistent install hint.
+try:
+    from sfepy.discrete.common.extmods._geommech import geme_mulAVSB3py  # noqa: F401
+except (ImportError, AttributeError) as exc:
+    dep_manager.require(
+        'c-ext-common',
+        context='sfepy.terms.terms_surface import failed: %s' % exc,
+    )
 
 ##
 # 22.08.2006, c

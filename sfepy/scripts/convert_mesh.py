@@ -10,7 +10,6 @@ sys.path.append('.')
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from sfepy.base.base import nm, output
 from sfepy.base.ioutils import remove_files
-from sfepy.base.output_manager import TempManager, create_output_manager
 from sfepy.discrete.fem import Mesh, FEDomain
 from sfepy.discrete.fem.meshio import output_mesh_formats
 from sfepy.discrete.fem.mesh import fix_double_nodes
@@ -106,9 +105,6 @@ helps = {
       Example: --revolve='p[-1,-2,0] v[1,0,0] n12 m180'""",
     'mirror': """mirror the given mesh using a plane defined by a point and
       a normal vector. Example: --mirror='p[-0.5,-0.2,0] v[0,1,0]'""",
-    'output_conflict':
-    'how to handle existing output files: increment (default),'
-    ' overwrite, or error',
 }
 
 def _parse_val_or_vec(option, name, parser):
@@ -216,10 +212,6 @@ def main():
     parser.add_argument('--mirror', metavar='options',
                         action='store', dest='mirror',
                         default=None, help=helps['mirror'])
-    parser.add_argument('--output-conflict', metavar='strategy',
-                        action='store', dest='output_conflict',
-                        choices=['increment', 'overwrite', 'error'],
-                        default='increment', help=helps['output_conflict'])
     parser.add_argument('filename_in')
     parser.add_argument('filename_out')
     options = parser.parse_args()
@@ -253,10 +245,11 @@ def main():
     filename_out = options.filename_out
 
     if options.remesh:
+        import tempfile
         import shlex
         import subprocess
 
-        dirname = TempManager.mkdtemp(prefix='sfepy_remesh_')
+        dirname = tempfile.mkdtemp()
 
         is_surface = options.remesh.startswith('q')
         if is_surface:
@@ -285,7 +278,6 @@ def main():
         mesh = Mesh.from_file(root + '.1.vtk')
 
         remove_files(dirname)
-        TempManager.unregister_dir(dirname)
 
     else:
         mesh = Mesh.from_file(filename_in)
@@ -460,28 +452,25 @@ def main():
         mesh_out = mt.extract_edges(mesh, eps=options.eps)
         mesh_out = mt.merge_lines(mesh_out)
 
-        import meshio
+        from sfepy.base.deps import dep_manager
+        meshio = dep_manager.require(
+            'meshio',
+            context='convert_mesh: meshio is required to extract edges',
+        )
         emesh = meshio.Mesh(mesh_out[0], [('line', mesh_out[2][0])],
                             cell_data={'mat_id' : mesh_out[3]})
         emesh.write(filename_out)
 
     else:
-        if op.exists(filename_out):
-            if options.output_conflict == 'error':
-                raise OSError(
-                    'output file already exists: %s'
-                    ' (use --output-conflict=overwrite or'
-                    ' increment to proceed)' % filename_out)
-            elif options.output_conflict == 'increment':
-                base, ext = op.splitext(filename_out)
-                counter = 1
-                while op.exists(filename_out):
-                    filename_out = '%s_%03d%s' % (base, counter, ext)
-                    counter += 1
-
         output('writing %s...' % filename_out)
         mesh.write(filename_out, file_format=options.format, binary=False)
         output('...done')
 
 if __name__ == '__main__':
-    main()
+    from sfepy.base.deps import (DependencyMissingError,
+                                fatal_dependency_error)
+
+    try:
+        main()
+    except DependencyMissingError as exc:
+        fatal_dependency_error(exc)

@@ -45,7 +45,6 @@ from argparse import ArgumentParser, RawDescriptionHelpFormatter
 import sfepy
 from sfepy.base.base import output, Struct
 from sfepy.base.conf import ProblemConf, get_standard_keywords
-from sfepy.base.output_manager import OutputManager, create_output_manager_from_conf
 from sfepy.applications import PDESolverApp, EVPSolverApp
 
 def print_terms():
@@ -90,12 +89,6 @@ helps = {
     'if given, load the given restart file',
     'log' :
     'log all messages to specified file (existing file will be overwritten!)',
-    'output_dir' :
-    'output directory for results [default: ./output with timestamped'
-    ' subdirectory]',
-    'output_conflict' :
-    'how to handle existing output files: increment (default),'
-    ' overwrite, or error',
     'quiet' :
     'do not print any messages to screen',
     'save_ebc' :
@@ -162,13 +155,6 @@ def main():
     parser.add_argument('--log', metavar='file',
                         action='store', dest='log',
                         default=None, help=helps['log'])
-    parser.add_argument('--output-dir', metavar='dir',
-                        action='store', dest='output_dir',
-                        default=None, help=helps['output_dir'])
-    parser.add_argument('--output-conflict', metavar='strategy',
-                        action='store', dest='output_conflict',
-                        choices=['increment', 'overwrite', 'error'],
-                        default=None, help=helps['output_conflict'])
     parser.add_argument('-q', '--quiet',
                         action='store_true', dest='quiet',
                         default=False, help=helps['quiet'])
@@ -244,13 +230,6 @@ def main():
         if conf.get('equations') is None:
             ValueError('required missing: equations')
 
-    output_manager = create_output_manager_from_conf(conf, options)
-
-    if output_manager is not None:
-        if options.output_conflict is not None:
-            output_manager.conflict_strategy = options.output_conflict
-        output_manager.save_config(filename_in)
-
     app_mode = options.app
     if app_mode is None:
         if conf.options.get('coefs') is not None:
@@ -273,15 +252,13 @@ def main():
 
     if app_mode == 'bvp':
         output_prefix = opts.get('output_prefix', 'sfepy:')
-        app = PDESolverApp(conf, options, output_prefix,
-                           output_manager=output_manager)
+        app = PDESolverApp(conf, options, output_prefix)
 
     elif app_mode == 'homogen':
         from sfepy.homogenization.homogen_app import HomogenizationApp
 
         output_prefix = opts.get('output_prefix', 'homogen:')
-        app = HomogenizationApp(conf, options, output_prefix,
-                                   output_manager=output_manager)
+        app = HomogenizationApp(conf, options, output_prefix)
 
     elif app_mode == 'bvp-mM':
         import sfepy.base.multiproc_mpi as multi_mpi
@@ -294,8 +271,7 @@ def main():
             opts.n_mpi_homog_slaves = nslaves
             output_prefix = opts.get('output_prefix', 'sfepy:')
 
-            app = PDESolverApp(conf, options, output_prefix,
-                               output_manager=output_manager)
+            app = PDESolverApp(conf, options, output_prefix)
             if hasattr(opts, 'parametric_hook'):  # Parametric study.
                 parametric_hook = conf.get_function(opts.parametric_hook)
                 app.parametrize(parametric_hook)
@@ -333,23 +309,24 @@ def main():
 
     elif app_mode == 'evp':
         output_prefix = opts.get('output_prefix', 'sfepy:')
-        app = EVPSolverApp(conf, options, output_prefix,
-                           output_manager=output_manager)
+        app = EVPSolverApp(conf, options, output_prefix)
 
     elif app_mode == 'phonon':
         from sfepy.homogenization.band_gaps_app import AcousticBandGapsApp
 
         output_prefix = opts.get('output_prefix', 'phonon:')
-        app = AcousticBandGapsApp(conf, options, output_prefix,
-                                   output_manager=output_manager)
+        app = AcousticBandGapsApp(conf, options, output_prefix)
 
     if hasattr(opts, 'parametric_hook'): # Parametric study.
         parametric_hook = conf.get_function(opts.parametric_hook)
         app.parametrize(parametric_hook)
     app()
 
-    if output_manager is not None:
-        output_manager.make_latest_link()
-
 if __name__ == '__main__':
-    main()
+    from sfepy.base.deps import (DependencyMissingError,
+                                fatal_dependency_error)
+
+    try:
+        main()
+    except DependencyMissingError as exc:
+        fatal_dependency_error(exc)

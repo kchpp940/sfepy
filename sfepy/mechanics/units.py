@@ -1,10 +1,8 @@
 """
 Some utilities for work with units of physical quantities.
 """
-try:
-    import sympy as sm
-except ImportError:
-    sm = None
+from sfepy.base.deps import dep_manager
+sm = dep_manager.optional_import('sympy')
 
 import numpy as nm
 

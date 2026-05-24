@@ -13,13 +13,23 @@ from sfepy.base.ioutils import (skip_read_line, look_ahead_line, read_token,
                                 edit_filename,
                                 read_from_hdf5, write_to_hdf5,
                                 HDF5ContextManager, get_or_create_hdf5_group)
+from sfepy.base.deps import dep_manager
 
 import os.path as op
-import meshio as meshiolib
+
+# Import meshio through the central registry so that a missing meshio
+# produces a single, consistent install hint.
 try:
-    from meshio import CellBlock as meshio_Cells  # for meshio >= 4.0.3
-except:
-    from meshio import Cells as meshio_Cells  # for 4.0.3 > meshio > 4.0.0
+    import meshio as meshiolib  # noqa: F401
+    try:
+        from meshio import CellBlock as meshio_Cells  # noqa: F401
+    except Exception:
+        from meshio import Cells as meshio_Cells  # noqa: F401
+except (ImportError, AttributeError) as exc:
+    dep_manager.require(
+        'meshio',
+        context='sfepy.discrete.fem.meshio import failed: %s' % exc,
+    )
 
 _supported_formats = {
     # format name: IO class, suffix, modes[, variants]

@@ -815,15 +815,18 @@ class PETScNonlinearSolver(NonlinearSolver):
     ]
 
     def __init__(self, conf, pmtx=None, prhs=None, comm=None, **kwargs):
-        if comm is None:
-            try:
-                import petsc4py
-                petsc4py.init([])
-            except ImportError:
-                msg = 'cannot import petsc4py!'
-                raise ImportError(msg)
+        from sfepy.base.deps import dep_manager
 
-        from petsc4py import PETSc as petsc
+        if comm is None:
+            petsc4py = dep_manager.optional_import('petsc4py')
+            if petsc4py is not None:
+                petsc4py.init([])
+
+        petsc = dep_manager.require(
+            'petsc4py.PETSc',
+            context='PETScNonlinearSolver.__init__: PETSc is required '
+                    'for the PETSc nonlinear solver',
+        )
 
         converged_reasons = {}
         for key, val in petsc.SNES.ConvergedReason.__dict__.items():

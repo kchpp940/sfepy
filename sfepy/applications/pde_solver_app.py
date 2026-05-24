@@ -1,13 +1,11 @@
 import os
 
-from sfepy.base.base import output, dict_to_struct, Struct, get_default
+from sfepy.base.base import output, dict_to_struct, Struct
 from sfepy.base.conf import ProblemConf, get_standard_keywords
-from sfepy.base.output_manager import OutputManager, create_output_manager_from_conf
 import sfepy.base.ioutils as io
 from sfepy.discrete import Problem
 from sfepy.discrete.fem import MeshIO, Mesh
 from .application import Application
-
 
 def solve_pde(conf, define_args=None, options=None, status=None, **app_options):
     """
@@ -52,17 +50,13 @@ def solve_pde(conf, define_args=None, options=None, status=None, **app_options):
                          save_regions_as_groups=False,
                          solve_not=False)
 
-    output_manager = create_output_manager_from_conf(conf, options)
-
     if conf.options.get('evps') is None:
-        app = PDESolverApp(conf, options, output_prefix,
-                           output_manager=output_manager)
+        app = PDESolverApp(conf, options, output_prefix)
 
     else:
         from .evp_solver_app import EVPSolverApp
 
-        app = EVPSolverApp(conf, options, output_prefix,
-                           output_manager=output_manager)
+        app = EVPSolverApp(conf, options, output_prefix)
 
     if hasattr(opts, 'parametric_hook'): # Parametric study.
         parametric_hook = conf.get_function(opts.parametric_hook)
@@ -103,26 +97,14 @@ def assign_standard_hooks(obj, get, conf):
 class PDESolverApp(Application):
 
     @staticmethod
-    def process_options(options, output_manager=None):
+    def process_options(options):
         """
         Application options setup. Sets default values for missing
         non-compulsory options.
-
-        Parameters
-        ----------
-        options : dict or Struct
-            Problem description options.
-        output_manager : OutputManager, optional
-            If provided, its run directory takes precedence over the
-            ``output_dir`` option.
         """
         get = options.get
 
-        if output_manager is not None:
-            output_dir = output_manager.get_output_dir()
-        else:
-            output_dir = get('output_dir', '.')
-
+        output_dir = get('output_dir', '.')
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
@@ -153,7 +135,7 @@ class PDESolverApp(Application):
         """`kwargs` are passed to  Problem.from_conf()
 
         Command-line options have precedence over conf.options."""
-        Application.__init__(self, conf, options, output_prefix, **kwargs)
+        Application.__init__( self, conf, options, output_prefix )
         self.setup_options()
 
         is_eqs = init_equations
@@ -161,11 +143,10 @@ class PDESolverApp(Application):
             is_eqs = False
         self.problem = Problem.from_conf(conf, init_equations=is_eqs, **kwargs)
 
-        self.setup_output_info(self.problem, self.options)
+        self.setup_output_info( self.problem, self.options )
 
-    def setup_options(self):
-        self.app_options = PDESolverApp.process_options(
-            self.conf.options, output_manager=self.output_manager)
+    def setup_options( self ):
+        self.app_options = PDESolverApp.process_options(self.conf.options)
 
         assign_standard_hooks(self, self.app_options.get, self.conf)
 
@@ -206,15 +187,9 @@ class PDESolverApp(Application):
         else:
             output_format = self.app_options.output_format
 
-        if self.output_manager is not None:
-            ofn_trunk = self.output_manager.get_output_trunk()
-            output_dir = self.output_manager.get_output_dir()
-        else:
-            output_dir = self.app_options.output_dir
-
         problem.setup_output(
             output_filename_trunk=ofn_trunk,
-            output_dir=output_dir,
+            output_dir=self.app_options.output_dir,
             output_format=output_format,
             file_format=self.app_options.file_format,
             split_results_by=self.app_options.split_results_by,
@@ -228,19 +203,7 @@ class PDESolverApp(Application):
             self.pre_process_hook(problem)
 
         ofn_trunk = problem.ofn_trunk
-
-        if self.output_manager is not None:
-            save_names = Struct(
-                ebc=self.output_manager.get_path('ebc', 'vtk')
-                if options.save_ebc else None,
-                ebc_nodes=self.output_manager.get_path('ebc_nodes', 'vtk')
-                if options.save_ebc_nodes else None,
-                regions=self.output_manager.get_path('region')
-                if options.save_regions else None,
-                regions_as_groups=self.output_manager.get_path('regions')
-                if options.save_regions_as_groups else None)
-        else:
-            save_names = Struct(ebc=ofn_trunk + '_ebc.vtk'
+        self.save_names = Struct(ebc=ofn_trunk + '_ebc.vtk'
                                  if options.save_ebc else None,
 
                                  ebc_nodes=ofn_trunk + '_ebc_nodes.vtk'
@@ -251,8 +214,6 @@ class PDESolverApp(Application):
 
                                  regions_as_groups=ofn_trunk + '_regions'
                                  if options.save_regions_as_groups else None)
-
-        self.save_names = save_names
 
         if any(self.save_names.to_dict().values()):
             save_only(self.conf, self.save_names, problem=problem)
