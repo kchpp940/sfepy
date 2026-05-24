@@ -3,6 +3,9 @@ import numpy as nm
 from sfepy.base.base import get_default, Struct
 from sfepy.discrete.fem.facets import build_orientation_map
 from sfepy.discrete.fem.utils import prepare_remap
+from sfepy.discrete.fem.dof_builder import (
+    compute_surface_econn, compute_phantom_econn,
+)
 
 class FESurface(Struct):
     """Description of a surface of a finite element domain."""
@@ -12,29 +15,8 @@ class FESurface(Struct):
         """nodes are sorted by node number -> same order as region.vertices"""
         self.name = get_default(name, 'surface_data_%s' % region.name)
 
-        face_indices = region.get_facet_indices()
-
-        faces = efaces[face_indices[:, 1]]
-        if faces.size == 0 and not region.is_empty:
-            raise ValueError('region with no faces! (%s)' % region.name)
-
-        if volume_region is None:
-            ii = face_indices[:, 0]
-        elif hasattr(volume_region, 'get_cell_indices'):
-            ii = volume_region.get_cell_indices(face_indices[:, 0])
-        else:
-            ii = volume_region
-
-        try:
-            ee = volume_econn[ii]
-
-        except:
-            raise ValueError('missing region face indices! (%s)'
-                             % region.name)
-
-        econn = nm.empty(faces.shape, dtype=nm.int32)
-        for ir, face in enumerate(faces):
-            econn[ir] = ee[ir, face]
+        econn, face_indices = compute_surface_econn(
+            region, efaces, volume_econn, volume_region)
 
         nodes = nm.unique(econn)
         if len(nodes):
@@ -168,8 +150,8 @@ class FEPhantomSurface(FESurface):
     def __init__(self, name, region, volume_econn):
         self.name = get_default(name, 'surface_data_%s' % region.name)
 
-        ii = region.get_cells()
-        econn = volume_econn[ii]
+        econn, face_indices = compute_phantom_econn(region, volume_econn)
+
         nodes = nm.unique(econn)
 
         if len(nodes):
@@ -187,8 +169,7 @@ class FEPhantomSurface(FESurface):
         bkey = 'b%s' % face_type[1:]
 
         self.econn = econn
-        self.fis = -nm.ones((n_fa, 2), dtype=nm.int32)
-        self.fis[:, 0] = ii
+        self.fis = face_indices
         self.n_fa, self.n_fp = n_fa, n_fp
         self.nodes = nodes
         self.leconn = leconn

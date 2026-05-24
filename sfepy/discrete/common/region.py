@@ -7,149 +7,72 @@ from sfepy.base.compat import in1d
 
 _depends = re.compile(r'r\.([a-zA-Z_\-0-9.]+)').findall
 
-
-class RegionDependencyAnalyzer:
-    """封装区域依赖分析逻辑。
-
-    负责从区域定义中构建依赖图并进行拓扑排序。
-    """
-
-    @staticmethod
-    def get_parents(selector):
-        """给定区域选择器，返回它所依赖的区域名称列表。
-
-        Parameters
-        ----------
-        selector : str
-            区域选择器字符串
-
-        Returns
-        -------
-        list
-            依赖的区域名称列表
-        """
-        return _depends(selector)
-
-    @staticmethod
-    def build_graph(region_defs):
-        """根据区域定义构建依赖图和名称映射。
-
-        Parameters
-        ----------
-        region_defs : dict
-            区域定义字典，键为排序名称，值为区域定义对象
-
-        Returns
-        -------
-        tuple
-            (graph, name_to_sort_name) 依赖图和名称映射
-        """
-        graph = {}
-        name_to_sort_name = {}
-        for sort_name, rdef in region_defs.items():
-            name, sel = rdef.name, rdef.select
-            if name in name_to_sort_name:
-                msg = 'region %s/%s already defined!' % (sort_name, name)
-                raise ValueError(msg)
-            name_to_sort_name[name] = sort_name
-
-            if name not in graph:
-                graph[name] = [0]
-
-            for parent in RegionDependencyAnalyzer.get_parents(sel):
-                graph[name].append(parent)
-
-            if rdef.get('parent', None) is not None:
-                graph[name].append(rdef.parent)
-
-        return graph, name_to_sort_name
-
-    @staticmethod
-    def sort_by_dependency(graph):
-        """对依赖图进行拓扑排序。
-
-        Parameters
-        ----------
-        graph : dict
-            依赖图
-
-        Returns
-        -------
-        list
-            拓扑排序后的区域名称列表
-
-        Raises
-        ------
-        ValueError
-            如果存在循环依赖或依赖不存在
-        """
-        out = []
-
-        n_nod = len(graph)
-        idone = 0
-        idone0 = -1
-        while idone < n_nod:
-
-            dep_removed = 0
-            for node, deps in graph.items():
-
-                if (len(deps) == 1) and not deps[0]:
-                    out.append(node)
-                    deps[0] = 1
-                    idone += 1
-
-                elif not deps[0]:
-
-                    for ii, dep in enumerate(deps[1:]):
-                        if not dep in graph:
-                            msg = 'dependency %s of region %s does not exist!'
-                            raise ValueError(msg % (dep, node))
-
-                        if graph[dep][0]:
-                            ir = deps.index(dep)
-                            deps.pop(ir)
-                            dep_removed += 1
-
-            if (idone <= idone0) and not dep_removed:
-                raise ValueError('circular dependency')
-            idone0 = idone
-
-        return out
-
-    @staticmethod
-    def analyze(region_defs):
-        """完整的依赖分析流程：构建图 + 拓扑排序。
-
-        Parameters
-        ----------
-        region_defs : dict
-            区域定义字典
-
-        Returns
-        -------
-        tuple
-            (sorted_regions, name_to_sort_name) 排序后的区域名称列表和名称映射
-        """
-        graph, name_to_sort_name = RegionDependencyAnalyzer.build_graph(region_defs)
-        sorted_regions = RegionDependencyAnalyzer.sort_by_dependency(graph)
-        return sorted_regions, name_to_sort_name
-
-
 def get_parents(selector):
     """
     Given a region selector, return names of regions it is based on.
     """
-    return RegionDependencyAnalyzer.get_parents(selector)
+    parents = _depends(selector)
+
+    return parents
 
 def get_dependency_graph(region_defs):
     """
     Return a dependency graph and a name-sort name mapping for given
     region definitions.
     """
-    return RegionDependencyAnalyzer.build_graph(region_defs)
+    graph = {}
+    name_to_sort_name = {}
+    for sort_name, rdef in region_defs.items():
+        name, sel = rdef.name, rdef.select
+        if name in name_to_sort_name:
+            msg = 'region %s/%s already defined!' % (sort_name, name)
+            raise ValueError(msg)
+        name_to_sort_name[name] = sort_name
+
+        if name not in graph:
+            graph[name] = [0]
+
+        for parent in get_parents(sel):
+            graph[name].append(parent)
+
+        if rdef.get('parent', None) is not None:
+            graph[name].append(rdef.parent)
+
+    return graph, name_to_sort_name
 
 def sort_by_dependency(graph):
-    return RegionDependencyAnalyzer.sort_by_dependency(graph)
+    out = []
+
+    n_nod = len(graph)
+    idone = 0
+    idone0 = -1
+    while idone < n_nod:
+
+        dep_removed = 0
+        for node, deps in graph.items():
+
+            if (len(deps) == 1) and not deps[0]:
+                out.append(node)
+                deps[0] = 1
+                idone += 1
+
+            elif not deps[0]:
+
+                for ii, dep in enumerate(deps[1:]):
+                    if not dep in graph:
+                        msg = 'dependency %s of region %s does not exist!'
+                        raise ValueError(msg % (dep, node))
+
+                    if graph[dep][0]:
+                        ir = deps.index(dep)
+                        deps.pop(ir)
+                        dep_removed += 1
+
+        if (idone <= idone0) and not dep_removed:
+            raise ValueError('circular dependency')
+        idone0 = idone
+
+    return out
 
 def are_disjoint(r1, r2):
     """

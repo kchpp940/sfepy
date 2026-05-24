@@ -27,6 +27,7 @@ from sfepy.discrete.fem.fe_surface import FESurface, FEPhantomSurface
 from sfepy.discrete.integrals import Integral
 from sfepy.discrete.fem.linearizer import (get_eval_dofs, get_eval_coors,
                                            create_output)
+from sfepy.discrete.fem.dof_builder import DofConnectivityBuilder
 
 def _find_geometry(region):
     cmesh = region.cmesh
@@ -348,6 +349,8 @@ class FEField(Field):
         Setup global DOF/basis functions, their indices and connectivity of the
         field. Called methods implemented in subclasses.
         """
+        self._init_dof_builder()
+
         self._setup_facet_orientations()
 
         self._init_econn()
@@ -368,6 +371,30 @@ class FEField(Field):
                       + self.n_face_dof + self.n_bubble_dof)
 
         self._setup_esurface()
+
+    def _init_dof_builder(self):
+        """Create the :class:`DofConnectivityBuilder` from the field's
+        strategy class attributes.
+
+        Subclasses that want DOF construction to be delegated to the
+        builder set ``_orientation_strategy_cls`` (required) and
+        ``_substitution_strategy_cls`` (optional). Fields without these
+        attributes simply get ``self.dof_builder = None`` and keep
+        using the legacy in-class implementations — no behaviour
+        change, no requirement to migrate.
+        """
+        orientation_cls = getattr(self, '_orientation_strategy_cls', None)
+        if orientation_cls is None:
+            self.dof_builder = None
+            return
+
+        orientation = orientation_cls()
+
+        substitution_cls = getattr(self, '_substitution_strategy_cls', None)
+        substitution = substitution_cls() if substitution_cls else None
+
+        self.dof_builder = DofConnectivityBuilder(self, orientation,
+                                                   substitution)
 
     def _init_econn(self):
         """
