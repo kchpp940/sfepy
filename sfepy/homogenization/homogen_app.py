@@ -6,54 +6,10 @@ import numpy as nm
 from sfepy.base.base import get_default, Struct
 from sfepy.homogenization.coefficients import Coefficients
 from sfepy.homogenization.engine import HomogenizationEngine
-from sfepy.homogenization.recovery import RecoveryContext
 from sfepy.applications import PDESolverApp
 import sfepy.discrete.fem.periodic as per
 import sfepy.linalg as la
 import sfepy.base.multiproc as multi
-
-
-class MicroStateCache:
-    """Keyed snapshot cache for per-microstructure state arrays.
-
-    Previously the ``HomogenizationApp`` carried an unstructured
-    ``micro_state_cache`` dict plus a free function
-    ``get_micro_cache_key``; readers had to match dict writes in one
-    method against dict reads in another. Encapsulating the writes and
-    keying into a dedicated object keeps the cache contract explicit
-    without changing any of the values that callers store.
-    """
-
-    def __init__(self):
-        self._data = {}
-
-    @staticmethod
-    def make_key(key, icoor, itime):
-        tt = '' if itime is None else '_t%03d' % itime
-        return '%s_%d%s' % (key, icoor, tt)
-
-    def store(self, key, icoor, itime, value):
-        cache_key = self.make_key(key, icoor, itime)
-        self._data[cache_key] = value
-
-    def store_batch(self, micro_states, icoor, itime):
-        for key, values in micro_states.items():
-            self.store(key, icoor, itime, values[icoor])
-
-    def get(self, key, icoor, itime, default=None):
-        return self._data.get(self.make_key(key, icoor, itime), default)
-
-    def as_dict(self):
-        return self._data
-
-    def __contains__(self, item):
-        return item in self._data
-
-    def __getitem__(self, item):
-        return self._data[item]
-
-    def __setitem__(self, item, value):
-        self._data[item] = value
 
 
 class HomogenizationApp(HomogenizationEngine):
@@ -96,7 +52,7 @@ class HomogenizationApp(HomogenizationEngine):
         self.n_micro = kwargs.get('n_micro',
                                   self.app_options.get('n_micro', None))
         self.updating_corrs = None
-        self.micro_state_cache = MicroStateCache()
+        self.micro_state_cache = {}
         self.multiproc_mode = None
         self.micro_states = None if self.n_micro is None else {}
 
@@ -129,10 +85,6 @@ class HomogenizationApp(HomogenizationEngine):
             shutil.copyfile(conf._filename,
                             op.join(output_dir, op.basename(conf._filename)))
 
-        self.recovery_context = RecoveryContext(
-            self.problem, output_dir=output_dir)
-        self.problem.recovery_context = self.recovery_context
-
     def setup_options(self):
         PDESolverApp.setup_options(self)
         po = HomogenizationApp.process_options
@@ -148,7 +100,8 @@ class HomogenizationApp(HomogenizationEngine):
         self.problem.homogenization_macro_data = self.macro_data
 
     def get_micro_cache_key(self, key, icoor, itime):
-        return MicroStateCache.make_key(key, icoor, itime)
+        tt = '' if itime is None else '_t%03d' % itime
+        return '%s_%d%s' % (key, icoor, tt)
 
     def update_micro_states(self):
         """
@@ -304,9 +257,11 @@ class HomogenizationApp(HomogenizationEngine):
                 print(coefs)
                 nm.set_printoptions(precision=prec)
 
+            ms_cache = self.micro_state_cache
             for ii in self.app_options.store_micro_idxs:
-                self.micro_state_cache.store_batch(self.micro_states,
-                                                    ii, itime)
+                for k in self.micro_states.keys():
+                    key = self.get_micro_cache_key(k, ii, itime)
+                    ms_cache[key] = self.micro_states[k][ii]
 
             coef_save_name = op.join(opts.output_dir, opts.coefs_filename)
             coefs.to_file_hdf5(coef_save_name + '%s.h5' % time_tag)

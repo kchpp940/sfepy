@@ -17,66 +17,6 @@ import atexit
 
 shared = Struct()
 
-
-class RecoveryContext:
-    """Explicit context for recovery operations.
-
-    Holds the state that was previously scattered between
-    ``_recovery_global_dict``, free functions (``get_output_suffix``) and
-    the per-call ``recover_*`` functions. By grouping naming policy,
-    cached problem/correctors and output options into one object, the
-    recovery flow becomes self-documenting and shares the same
-    vocabulary as ``HomogContext`` and ``SaveNamePolicy``.
-    """
-
-    __slots__ = (
-        'problem', 'micro_problem', 'output_dir',
-        'naming_scheme', 'format', 'output_format',
-        '_cached',
-    )
-
-    def __init__(self, problem, micro_problem=None,
-                 naming_scheme='step_iel', output_dir=None):
-        self.problem = problem
-        self.micro_problem = micro_problem
-        self.output_dir = output_dir or problem.output_dir
-        self.naming_scheme = naming_scheme
-        self.format = get_print_info(problem.domain.mesh.n_el, fill='0')[1]
-        self.output_format = (
-            micro_problem.output_format if micro_problem is not None
-            else 'vtk'
-        )
-        self._cached = {}
-
-    def get_output_suffix(self, iel, ts):
-        if self.output_format != 'h5':
-            if self.naming_scheme == 'step_iel':
-                suffix = '.'.join((ts.suffix % ts.step, self.format % iel))
-            else:
-                suffix = '.'.join((self.format % iel, ts.suffix % ts.step))
-        else:
-            suffix = self.format % iel
-
-        return suffix
-
-    def get_recovery_filename(self, iel, ts, prefix='recovered_'):
-        micro_problem = self.micro_problem or self.problem
-        suffix = self.get_output_suffix(iel, ts)
-        micro_name = micro_problem.get_output_name(extra=suffix)
-        filename = op.join(self.output_dir,
-                           prefix + op.basename(micro_name))
-        return filename
-
-    def cache(self, key, value):
-        self._cached[key] = value
-
-    def get_cached(self, key, default=None):
-        return self._cached.get(key, default)
-
-
-_recovery_global_dict = {}
-
-
 #
 # TODO : interpolate fvars to macro times. ?mid-points?
 #
@@ -344,8 +284,7 @@ def recover_bones(problem, micro_problem, region, eps0,
                   ts, strain, dstrains, p_grad, pressures,
                   corrs_permeability, corrs_rs, corrs_time_rs,
                   corrs_pressure, corrs_time_pressure,
-                  var_names, naming_scheme='step_iel',
-                  recovery_context=None):
+                  var_names, naming_scheme='step_iel'):
     r"""
     Notes
     -----
@@ -356,13 +295,6 @@ def recover_bones(problem, micro_problem, region, eps0,
 
       is in corrs_pressure -> from time correctors only 'u', 'dp' are needed.
     """
-
-    if recovery_context is None:
-        recovery_context = getattr(problem, 'recovery_context', None)
-    if recovery_context is None:
-        recovery_context = RecoveryContext(
-            problem, micro_problem=micro_problem,
-            naming_scheme=naming_scheme)
 
     dim = problem.domain.mesh.dim
 
@@ -377,6 +309,9 @@ def recover_bones(problem, micro_problem, region, eps0,
     micro_coor = micro_u.field.get_coor()
 
     nodes_yc = micro_problem.domain.regions['Yc'].vertices
+
+    join = os.path.join
+    format = get_print_info(problem.domain.mesh.n_el, fill='0')[1]
 
     for ii, iel in enumerate(region.cells):
         print('ii: %d, iel: %d' % (ii, iel))
@@ -442,7 +377,11 @@ def recover_bones(problem, micro_problem, region, eps0,
                                 mode='cell', data=aux,
                                 dofs=None)
 
-        filename = recovery_context.get_recovery_filename(iel, ts)
+        suffix = get_output_suffix(iel, ts, naming_scheme, format,
+                                   micro_problem.output_format)
+        micro_name = micro_problem.get_output_name(extra=suffix)
+        filename = join(problem.output_dir,
+                        'recovered_' + os.path.basename(micro_name))
 
         micro_problem.save_state(filename, out=out, ts=ts)
 
@@ -452,15 +391,7 @@ def recover_paraflow(problem, micro_problem, region,
                      corrs_rs, corrs_time_rs,
                      corrs_alpha1, corrs_time_alpha1,
                      corrs_alpha2, corrs_time_alpha2,
-                     var_names, naming_scheme='step_iel',
-                     recovery_context=None):
-
-    if recovery_context is None:
-        recovery_context = getattr(problem, 'recovery_context', None)
-    if recovery_context is None:
-        recovery_context = RecoveryContext(
-            problem, micro_problem=micro_problem,
-            naming_scheme=naming_scheme)
+                     var_names, naming_scheme='step_iel'):
 
     dim = problem.domain.mesh.dim
 
@@ -476,6 +407,9 @@ def recover_paraflow(problem, micro_problem, region,
     nodes_y2 = micro_problem.domain.regions['Y2'].vertices
 
     to_output = micro_problem.variables.create_output
+
+    join = os.path.join
+    format = get_print_info(problem.domain.mesh.n_el, fill='0')[1]
 
     for ii, iel in enumerate(region.cells):
         print('ii: %d, iel: %d' % (ii, iel))
@@ -512,7 +446,10 @@ def recover_paraflow(problem, micro_problem, region,
                          mode='vertex', data=p_mic,
                          var_name=vp, dofs=micro_p.dofs)
 
-        filename = recovery_context.get_recovery_filename(iel, ts)
+        suffix = get_output_suffix(iel, ts, naming_scheme, format,
+                                   micro_problem.output_format)
+        micro_name = micro_problem.get_output_name(extra=suffix)
+        filename = join(problem.output_dir, 'recovered_' + micro_name)
 
         micro_problem.save_state(filename, out=out, ts=ts)
 
@@ -587,8 +524,7 @@ def get_recovery_points(region, eps0):
 def recover_micro_hook(micro_filename, region, macro, eps0,
                        region_mode='el_centers', eval_mode='constant',
                        eval_vars=None, corrs=None, recovery_file_tag='',
-                       define_args=None, output_dir=None, verbose=False,
-                       recovery_context=None):
+                       define_args=None, output_dir=None, verbose=False):
     """
     Parameters
     ----------
@@ -626,8 +562,6 @@ def recover_micro_hook(micro_filename, region, macro, eps0,
         The output directory.
     verbose : bool
         The verbose terminal output.
-    recovery_context : RecoveryContext, optional
-        Explicit context for recovery operations.
     """
     import sfepy.base.multiproc_proc as multi
 
@@ -660,12 +594,6 @@ def recover_micro_hook(micro_filename, region, macro, eps0,
         _recovery_global_dict['micro_problem'] = pb, corrs, recovery_hook
     else:
         pb, corrs, recovery_hook = _recovery_global_dict['micro_problem']
-
-    if recovery_context is None:
-        recovery_context = getattr(pb, 'recovery_context', None)
-    if recovery_context is None:
-        recovery_context = RecoveryContext(
-            problem=pb, output_dir=output_dir or pb.conf.options.get('output_dir', '.'))
 
     is_multiproc = pb.conf.options.get('multiprocessing', True)\
         and multi.use_multiprocessing
@@ -812,7 +740,7 @@ def recover_micro_hook(micro_filename, region, macro, eps0,
         conn = nm.vstack(conn)
         cgroups = nm.tile(mesh.cmesh.cell_groups.squeeze(), (nrve,))
         # Get region mesh and data
-        output_dir = recovery_context.output_dir
+        output_dir = pb.conf.options.get('output_dir', '.')
         for rn in outregs_data.keys():
             rlabel, cidxs = outregs_info[rn]
             gcidxs = nm.hstack([cidxs + mesh.n_el * ii for ii in range(nrve)])

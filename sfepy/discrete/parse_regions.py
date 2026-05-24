@@ -23,6 +23,54 @@ eval_codes = ['E_VIR', 'E_VOS', 'E_VBF', 'E_VOG', 'E_OVIR', 'E_VI', 'E_VOSET',
               'E_CBF', 'E_COG', 'E_CI', 'E_COSET']
 kw_codes = ['KW_All', 'KW_Region']
 
+
+class RegionParser:
+    """封装区域选择器语法解析逻辑。
+
+    负责将 selector 字符串解析为 AST 栈，提供访问栈的方法。
+    """
+
+    def __init__(self):
+        self._stack = []
+        self._bnf = create_bnf(self._stack)
+
+    def parse(self, selector):
+        """解析 selector 字符串，返回解析栈的副本。
+
+        Parameters
+        ----------
+        selector : str
+            区域选择器字符串
+
+        Returns
+        -------
+        list
+            解析产生的 AST 栈副本
+        """
+        self._stack.clear()
+        try:
+            self._bnf.parseString(selector)
+        except ParseException:
+            print('parsing failed:', selector)
+            raise
+        return self._stack.copy()
+
+    def visit(self, op_visitor, leaf_visitor):
+        """访问当前解析栈并执行操作。
+
+        Parameters
+        ----------
+        op_visitor : callable
+            操作符节点访问器
+        leaf_visitor : callable
+            叶子节点访问器
+
+        Returns
+        -------
+        访问栈返回的结果
+        """
+        return visit_stack(self._stack, op_visitor, leaf_visitor)
+
 def to_stack(stack):
     def push_first(str, loc, toks):
         if toks:
