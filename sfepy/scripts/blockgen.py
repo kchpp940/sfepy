@@ -2,9 +2,10 @@
 """
 Block mesh generator.
 """
+import sys
+sys.path.append('.')
+from argparse import ArgumentParser
 import os.path as op
-
-from sfepy.base.cli import build_parser, run_main
 
 import numpy as nm
 
@@ -71,11 +72,12 @@ def add_args(parser):
                         default=False, help=helps['2d'])
 
 def main():
-    parser = build_parser(description=__doc__)
+    parser = ArgumentParser(description=__doc__)
+    parser.add_argument('--version', action='version', version='%(prog)s')
     add_args(parser)
 
     options = parser.parse_args()
     gen_block(options)
 
 if __name__ == '__main__':
-    run_main(main)
+    main()

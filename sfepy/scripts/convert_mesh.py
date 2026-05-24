@@ -5,16 +5,12 @@ Convert a mesh file from one SfePy-supported format to another.
 import sys
 import os.path as op
 from ast import literal_eval
+sys.path.append('.')
 
-import numpy as nm
-
-from sfepy.base.cli import (
-    build_parser,
-    run_main,
-    fatal,
-)
-from sfepy.base.base import output
+from argparse import ArgumentParser, RawDescriptionHelpFormatter
+from sfepy.base.base import nm, output
 from sfepy.base.ioutils import remove_files
+from sfepy.base.output_manager import TempManager, create_output_manager
 from sfepy.discrete.fem import Mesh, FEDomain
 from sfepy.discrete.fem.meshio import output_mesh_formats
 from sfepy.discrete.fem.mesh import fix_double_nodes
@@ -110,8 +106,10 @@ helps = {
       Example: --revolve='p[-1,-2,0] v[1,0,0] n12 m180'""",
     'mirror': """mirror the given mesh using a plane defined by a point and
       a normal vector. Example: --mirror='p[-0.5,-0.2,0] v[0,1,0]'""",
+    'output_conflict':
+    'how to handle existing output files: increment (default),'
+    ' overwrite, or error',
 }
-
 
 def _parse_val_or_vec(option, name, parser):
     if option is not None:
@@ -122,7 +120,9 @@ def _parse_val_or_vec(option, name, parser):
                 option = [float(ii) for ii in option.split(',')]
             option = nm.array(option, dtype=nm.float64, ndmin=1)
         except:
-            fatal('bad %s! (%s)' % (name, option))
+            output('bad %s! (%s)' % (name, option))
+            parser.print_help()
+            sys.exit(1)
 
     return option
 
@@ -141,8 +141,9 @@ def _parse_fun_args(s, args_tab):
     return args, dargs
 
 
-def _build_parser():
-    parser = build_parser(description=__doc__, add_common=False)
+def main():
+    parser = ArgumentParser(description=__doc__,
+                            formatter_class=RawDescriptionHelpFormatter)
     parser.add_argument('-s', '--scale', metavar='scale',
                         action='store', dest='scale',
                         default=None, help=helps['scale'])
@@ -215,13 +216,12 @@ def _build_parser():
     parser.add_argument('--mirror', metavar='options',
                         action='store', dest='mirror',
                         default=None, help=helps['mirror'])
+    parser.add_argument('--output-conflict', metavar='strategy',
+                        action='store', dest='output_conflict',
+                        choices=['increment', 'overwrite', 'error'],
+                        default='increment', help=helps['output_conflict'])
     parser.add_argument('filename_in')
     parser.add_argument('filename_out')
-    return parser
-
-
-def main():
-    parser = _build_parser()
     options = parser.parse_args()
 
     if options.list:
@@ -232,7 +232,7 @@ def main():
         output('Supported writable mesh formats:')
         output('--------------------------------')
         output_mesh_formats('w')
-        return
+        sys.exit(0)
 
     scale = _parse_val_or_vec(options.scale, 'scale', parser)
     center = _parse_val_or_vec(options.center, 'center', parser)
@@ -243,6 +243,7 @@ def main():
             y=[0.0, 1.0, 0.0],
             z=[0.0, 0.0, 1.0],
         )[options.rot_axis]
+
     else:
         rot_axis = _parse_val_or_vec(options.rot_axis, 'rot_axis', parser)
 
@@ -252,11 +253,10 @@ def main():
     filename_out = options.filename_out
 
     if options.remesh:
-        import tempfile
         import shlex
         import subprocess
 
-        dirname = tempfile.mkdtemp()
+        dirname = TempManager.mkdtemp(prefix='sfepy_remesh_')
 
         is_surface = options.remesh.startswith('q')
         if is_surface:
@@ -276,7 +276,7 @@ def main():
             shutil.copy(filename_in, dirname)
             filename = op.join(dirname, op.basename(filename_in))
 
-        qopts = ''.join(options.remesh.split())
+        qopts = ''.join(options.remesh.split()) # Remove spaces.
         command = 'tetgen -BFENkACp%s %s' % (qopts, filename)
         args = shlex.split(command)
         subprocess.call(args)
@@ -285,6 +285,7 @@ def main():
         mesh = Mesh.from_file(root + '.1.vtk')
 
         remove_files(dirname)
+        TempManager.unregister_dir(dirname)
 
     else:
         mesh = Mesh.from_file(filename_in)
@@ -368,7 +369,7 @@ def main():
         for mat_id in mat_ids:
             idxs = nm.where(cgroups == mat_id)[0]
             imesh = Mesh.from_data(mesh.name + '_matid_%d' % mat_id,
-                                   coor, ngroups,
+                                   coors, ngroups,
                                    [conns[idxs]], [cgroups[idxs]], [desc])
 
             fbase, fext = op.splitext(filename_out)
@@ -465,10 +466,22 @@ def main():
         emesh.write(filename_out)
 
     else:
+        if op.exists(filename_out):
+            if options.output_conflict == 'error':
+                raise OSError(
+                    'output file already exists: %s'
+                    ' (use --output-conflict=overwrite or'
+                    ' increment to proceed)' % filename_out)
+            elif options.output_conflict == 'increment':
+                base, ext = op.splitext(filename_out)
+                counter = 1
+                while op.exists(filename_out):
+                    filename_out = '%s_%03d%s' % (base, counter, ext)
+                    counter += 1
+
         output('writing %s...' % filename_out)
         mesh.write(filename_out, file_format=options.format, binary=False)
         output('...done')
 
-
 if __name__ == '__main__':
-    run_main(main)
+    main()

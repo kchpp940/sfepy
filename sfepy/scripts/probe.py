@@ -40,25 +40,22 @@ of the element. To obtain some values even in this case, try increasing the
 --close-limit option value.
 """
 import os
+from argparse import ArgumentParser, RawDescriptionHelpFormatter
 
 import numpy as nm
 
-from sfepy.base.cli import (
-    build_parser,
-    setup_debug,
-    configure_output,
-    parse_comma_list,
-    build_app_options,
-    run_main,
-)
+import sfepy
 from sfepy.base.base import output, assert_
 from sfepy.base.ioutils import edit_filename
 from sfepy.base.conf import ProblemConf, get_standard_keywords
+from sfepy.base.output_manager import create_output_manager_from_conf
 from sfepy.discrete import Problem
 from sfepy.discrete.fem import MeshIO
 from sfepy.discrete.probes import write_results, read_results
 
 helps = {
+    'debug':
+    'automatically start debugger when an exception is raised',
     'filename' :
     'basename of output file(s) [default: <basename of input file>]',
     'output_format' :
@@ -80,8 +77,10 @@ helps = {
     'postprocessing mode',
     'radial' :
     'assume radial integration',
+    'output_conflict' :
+    'how to handle existing output files: increment (default),'
+    ' overwrite, or error',
 }
-
 
 def generate_probes(filename_input, filename_results, options,
                     conf=None, problem=None, probes=None, labels=None,
@@ -95,9 +94,18 @@ def generate_probes(filename_input, filename_results, options,
 
     opts = conf.options
 
-    if options.auto_dir:
-        output_dir = opts.get_('output_dir', '.')
-        filename_results = os.path.join(output_dir, filename_results)
+    output_manager = create_output_manager_from_conf(conf, options)
+
+    if output_manager is not None:
+        output_manager.conflict_strategy = options.output_conflict
+        if options.auto_dir:
+            output_dir = output_manager.get_output_dir()
+            filename_results = os.path.join(output_dir,
+                                            os.path.basename(filename_results))
+    else:
+        if options.auto_dir:
+            output_dir = opts.get_('output_dir', '.')
+            filename_results = os.path.join(output_dir, filename_results)
 
     output('results in: %s' % filename_results)
 
@@ -153,6 +161,7 @@ def generate_probes(filename_input, filename_results, options,
 
             if key is not None:
                 filename = filename_template % (key, ip)
+
             else:
                 filename = filename_template % ip
 
@@ -161,20 +170,46 @@ def generate_probes(filename_input, filename_results, options,
                     for fig_name, fig_fig in fig.items():
                         fig_filename = edit_filename(filename,
                                                      suffix='_' + fig_name)
+                        fig_filename = _apply_conflict_strategy(
+                            fig_filename, options.output_conflict)
                         fig_fig.savefig(fig_filename)
                         output('figure ->', os.path.normpath(fig_filename))
 
                 else:
+                    filename = _apply_conflict_strategy(
+                        filename, options.output_conflict)
                     fig.savefig(filename)
                     output('figure ->', os.path.normpath(filename))
 
             if results is not None:
                 txt_filename = edit_filename(filename, new_ext='.txt')
-
+                txt_filename = _apply_conflict_strategy(
+                    txt_filename, options.output_conflict)
                 write_results(txt_filename, probe, results)
 
                 output('data ->', os.path.normpath(txt_filename))
 
+def _apply_conflict_strategy(filename, conflict_strategy):
+    """Apply the conflict strategy to a filename that already exists."""
+    import os.path as op
+
+    if not op.exists(filename):
+        return filename
+
+    if conflict_strategy == 'error':
+        raise OSError(
+            'output file already exists: %s'
+            ' (use --output-conflict=overwrite or'
+            ' increment to proceed)' % filename)
+
+    elif conflict_strategy == 'increment':
+        base, ext = op.splitext(filename)
+        counter = 1
+        while op.exists(filename):
+            filename = '%s_%03d%s' % (base, counter, ext)
+            counter += 1
+
+    return filename
 
 def integrate_along_line(x, y, is_radial=False):
     r"""
@@ -194,12 +229,14 @@ def integrate_along_line(x, y, is_radial=False):
 
     return val
 
-
 def postprocess(filename_input, filename_results, options):
     """
     Postprocess probe data files - replot, integrate data.
     """
     from matplotlib import pyplot as plt
+
+    filename_results = _apply_conflict_strategy(filename_results,
+                                            options.output_conflict)
 
     header, results = read_results(filename_input,
                                    only_names=options.only_names)
@@ -230,9 +267,14 @@ def postprocess(filename_input, filename_results, options):
 
     fig.savefig(filename_results)
 
-
-def _build_parser():
-    parser = build_parser(description=__doc__)
+def main():
+    parser = ArgumentParser(description=__doc__,
+                            formatter_class=RawDescriptionHelpFormatter)
+    parser.add_argument('--version', action='version',
+                        version='%(prog)s ' + sfepy.__version__)
+    parser.add_argument('--debug',
+                        action='store_true', dest='debug',
+                        default=False, help=helps['debug'])
     parser.add_argument('-o', metavar='filename',
                         action='store', dest='output_filename_trunk',
                         default=None, help=helps['filename'])
@@ -260,37 +302,29 @@ def _build_parser():
     parser.add_argument('--radial',
                         action='store_true', dest='radial',
                         default=False, help=helps['radial'])
+    parser.add_argument('--output-conflict', metavar='strategy',
+                        action='store', dest='output_conflict',
+                        choices=['increment', 'overwrite', 'error'],
+                        default='increment', help=helps['output_conflict'])
     parser.add_argument('filename_in')
     parser.add_argument('filename_out')
-    return parser
-
-
-def main():
-    parser = _build_parser()
     options = parser.parse_args()
 
-    setup_debug(options)
-    configure_output(options, prefix='probe:')
+    if options.debug:
+        from sfepy.base.base import debug_on_error; debug_on_error()
 
     filename_input = options.filename_in
     filename_results = options.filename_out
 
-    options.only_names = parse_comma_list(options.only_names)
+    if options.only_names is not None:
+        options.only_names = options.only_names.split(',')
 
-    app_opts = build_app_options(**vars(options))
-    app_opts.auto_dir = options.auto_dir
-    app_opts.same_dir = options.same_dir
-    app_opts.only_names = options.only_names
-    app_opts.step = options.step
-    app_opts.close_limit = options.close_limit
-    app_opts.postprocess = options.postprocess
-    app_opts.radial = options.radial
+    output.prefix = 'probe:'
 
-    if app_opts.postprocess:
-        postprocess(filename_input, filename_results, app_opts)
+    if options.postprocess:
+        postprocess(filename_input, filename_results, options)
     else:
-        generate_probes(filename_input, filename_results, app_opts)
-
+        generate_probes(filename_input, filename_results, options)
 
 if __name__ == '__main__':
-    run_main(main)
+    main()

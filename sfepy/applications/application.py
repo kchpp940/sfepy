@@ -1,4 +1,4 @@
-from sfepy.base.base import Struct, output, insert_as_static_method
+from sfepy.base.base import Struct, output, insert_as_static_method, get_default
 
 
 class Application(Struct):
@@ -8,14 +8,76 @@ class Application(Struct):
     Subclasses should implement: __init__(), call().
 
     Automates parametric studies, see parametrize().
+
+    Parameters
+    ----------
+    conf : ProblemConf
+        The problem configuration.
+    options : argparse.Namespace or Struct
+        Runtime options.
+    output_prefix : str
+        Prefix for log output.
+    output_manager : OutputManager, optional
+        Unified output directory manager. If None means legacy behavior.
     """
     def __init__(self, conf, options, output_prefix, **kwargs):
+        output_manager = kwargs.pop('output_manager', None)
         Struct.__init__(self,
                         conf=conf,
                         options=options,
-                        output_prefix=output_prefix)
+                        output_prefix=output_prefix,
+                        output_manager=output_manager)
         output.prefix = self.output_prefix
         self.restore()
+
+    def get_output_dir(self):
+        """
+        Return the output directory, preferring OutputManager when
+        available, falling back to the problem's output_dir.
+
+        Returns
+        -------
+        output_dir : str
+        """
+        if self.output_manager is not None:
+            return self.output_manager.get_output_dir()
+        return get_default(
+            getattr(self, 'output_dir', '.'),
+            '.',
+        )
+
+    def get_output_trunk(self):
+        """
+        Return the output filename trunk (path).
+
+        Returns
+        -------
+        trunk : str or None
+        """
+        if self.output_manager is not None:
+            return self.output_manager.get_output_trunk()
+        return None
+
+    def get_output_path(self, name, ext=None, subdir=None):
+        """
+        Generate a standard output file path.
+
+        Parameters
+        ----------
+        name : str
+            File name component.
+        ext : str, optional
+            File extension without dot.
+        subdir : str, optional
+            Subdirectory within run directory.
+
+        Returns
+        -------
+        path : str
+        """
+        if self.output_manager is not None:
+            return self.output_manager.get_path(name, ext=ext, subdir=subdir)
+        return None
 
     def setup_options(self):
         pass

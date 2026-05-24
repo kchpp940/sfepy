@@ -419,20 +419,46 @@ class Problem(Struct):
                           linearization=default_linearization)
 
     def setup_output(self, output_filename_trunk=None, output_dir=None,
-                     output_format=None, file_format=None, float_format=None,
-                     split_results_by=None, linearization=None):
+                   output_format=None, file_format=None, float_format=None,
+                   split_results_by=None, linearization=None,
+                   output_manager=None):
         """
         Sets output options to given values, or uses the defaults for
         each argument that is None.
+
+        Parameters
+        ----------
+        output_filename_trunk : str, optional
+            Base name (without extension) for output files.
+        output_dir : str, optional
+            Directory for output files.
+        output_format : str, optional
+            Output file format (default 'vtk', 'h5', etc.).
+        file_format : str, optional
+            Mesh file format override.
+        float_format : str, optional
+            Floating point format for text output.
+        split_results_by : str, optional
+            How to split results (variable/region).
+        linearization : Struct, optional
+            Linearization options.
+        output_manager : OutputManager, optional
+            Unified output manager. If provided, its run directory and
+            trunk override the corresponding arguments.
         """
         self.output_modes = {'vtk' : 'sequence',
                              'h5' : 'single', 'h5x' : 'single',
                              'msh' : 'sequence'}
 
-        self.ofn_trunk = get_default(output_filename_trunk,
-                                     op.basename(self.domain.name))
+        self.output_manager = output_manager
 
-        self.set_output_dir(output_dir)
+        if output_manager is not None:
+            self.ofn_trunk = output_manager.get_output_trunk()
+            self.set_output_dir(output_manager.get_output_dir())
+        else:
+            self.ofn_trunk = get_default(output_filename_trunk,
+                                         op.basename(self.domain.name))
+            self.set_output_dir(output_dir)
 
         self.output_format = get_default(output_format, 'vtk')
         self.file_format = file_format
@@ -2020,12 +2046,44 @@ class Problem(Struct):
 
         return variables
 
-    def get_output_name(self, suffix=None, extra=None, mode=None):
+    def get_output_name(self, suffix=None, extra=None, mode=None,
+                        category=None):
         """
         Return default output file name, based on the output directory,
         output format, step suffix and mode. If present, the extra
         string is put just before the output format suffix.
+
+        Parameters
+        ----------
+        suffix : str, optional
+            Step suffix appended to the filename (e.g., time step).
+        extra : str, optional
+            Extra string placed just before the output format suffix.
+        mode : str, optional
+            Output mode: 'sequence' or 'single'.
+        category : str, optional
+            Standardized category label (e.g., 'ebc', 'eigenvalue',
+            'coefficient', 'restart'). When provided via
+            OutputManager, the path is generated through the manager
+            for consistency.
+
+        Returns
+        -------
+        name : str
+            The full output file path.
         """
+        if category is not None and self.output_manager is not None:
+            out = self.output_manager.get_path(category,
+                                               ext=self.output_format)
+            if suffix is not None:
+                if mode is None:
+                    mode = self.output_modes[self.output_format]
+                if mode == 'sequence':
+                    out = '.'.join((out, suffix))
+            if extra is not None:
+                out = '.'.join((out, extra, self.output_format))
+            return out
+
         out = op.join(self.output_dir, self.ofn_trunk)
 
         if suffix is not None:

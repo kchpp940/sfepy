@@ -2,7 +2,9 @@
 """
 Print various information about a mesh.
 """
-from sfepy.base.cli import build_parser, run_main
+import sys
+sys.path.append('.')
+from argparse import RawDescriptionHelpFormatter, ArgumentParser
 
 import numpy as nm
 from scipy.sparse.csgraph import connected_components
@@ -95,11 +97,13 @@ def add_args(parser):
                         default=False, help=helps['detailed'])
 
 def main():
-    parser = build_parser(description=__doc__.rstrip())
+    parser = ArgumentParser(description=__doc__.rstrip(),
+                            formatter_class=RawDescriptionHelpFormatter)
+    parser.add_argument('--version', action='version', version='%(prog)s')
     add_args(parser)
 
     options = parser.parse_args()
     show_mesh_info(options)
 
 if __name__ == '__main__':
-    run_main(main)
+    main()

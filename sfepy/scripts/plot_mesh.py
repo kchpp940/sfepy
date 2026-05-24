@@ -5,7 +5,9 @@ Plot mesh connectivities, facet orientations, global and local DOF ids etc.
 To switch off plotting some mesh entities, set the corresponding color to
 `None`.
 """
-from sfepy.base.cli import build_parser, run_main
+import sys
+sys.path.append('.')
+from argparse import ArgumentParser
 
 import matplotlib.pyplot as plt
 
@@ -41,7 +43,8 @@ def main():
     default_cell_opts = """color='r', label_global=12"""
     default_wireframe_opts = "color='k'"
 
-    parser = build_parser(description=__doc__)
+    parser = ArgumentParser(description=__doc__)
+    parser.add_argument('--version', action='version', version='%(prog)s')
     parser.add_argument('--vertex-opts', metavar='dict-like',
                         action='store', dest='vertex_opts',
                         default=default_vertex_opts,
@@ -112,4 +115,4 @@ def main():
         plt.show()
 
 if __name__ == '__main__':
-    run_main(main)
+    main()

@@ -447,12 +447,13 @@ class MatlabEigenvalueSolver(EigenvalueSolver):
                  status=None, conf=None, comm=None, context=None):
         import os
         import shutil
-        import tempfile
         import scipy.io as sio
+
+        from sfepy.base.output_manager import TempManager
 
         solver_kwargs = self.build_solver_kwargs(conf)
 
-        dirname = tempfile.mkdtemp()
+        dirname = TempManager.mkdtemp(prefix='sfepy_eig_')
         mtx_filename = os.path.join(dirname, 'matrices.mat')
         eigs_filename = os.path.join(dirname, 'eigs.mat')
         sio.savemat(mtx_filename, {
@@ -472,6 +473,7 @@ class MatlabEigenvalueSolver(EigenvalueSolver):
         evp = self.solver_call(mtx_filename, eigs_filename, conf.which)
 
         shutil.rmtree(dirname)
+        TempManager.unregister_dir(dirname)
 
         out = evp['vals'][:, 0]
         if eigenvectors:

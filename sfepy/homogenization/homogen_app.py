@@ -79,11 +79,14 @@ class HomogenizationApp(HomogenizationEngine):
                 self.micro_states['id'].append(
                     mac_ids[im] if mac_ids is not None else im)
 
-        output_dir = self.problem.output_dir
-
-        if conf._filename is not None:
-            shutil.copyfile(conf._filename,
-                            op.join(output_dir, op.basename(conf._filename)))
+        if self.output_manager is not None:
+            self.output_manager.save_config(conf._filename)
+        else:
+            output_dir = self.problem.output_dir
+            if conf._filename is not None:
+                shutil.copyfile(conf._filename,
+                                op.join(output_dir,
+                                            op.basename(conf._filename)))
 
     def setup_options(self):
         PDESolverApp.setup_options(self)
@@ -263,11 +266,19 @@ class HomogenizationApp(HomogenizationEngine):
                     key = self.get_micro_cache_key(k, ii, itime)
                     ms_cache[key] = self.micro_states[k][ii]
 
-            coef_save_name = op.join(opts.output_dir, opts.coefs_filename)
-            coefs.to_file_hdf5(coef_save_name + '%s.h5' % time_tag)
-            coefs.to_file_txt(coef_save_name + '%s.txt' % time_tag,
-                              opts.tex_names,
-                              opts.float_format)
+            if self.output_manager is not None:
+                coef_save_name = self.output_manager.get_path(
+                    opts.coefs_filename + time_tag)
+                coefs.to_file_hdf5(coef_save_name + '.h5')
+                coefs.to_file_txt(coef_save_name + '.txt',
+                                  opts.tex_names,
+                                  opts.float_format)
+            else:
+                coef_save_name = op.join(opts.output_dir, opts.coefs_filename)
+                coefs.to_file_hdf5(coef_save_name + '%s.h5' % time_tag)
+                coefs.to_file_txt(coef_save_name + '%s.txt' % time_tag,
+                                  opts.tex_names,
+                                  opts.float_format)
 
         if ret_all:
             return coefs, dependencies
