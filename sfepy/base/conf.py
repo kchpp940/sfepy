@@ -27,7 +27,7 @@ _required = ['filename_mesh|filename_domain', 'field_[0-9]+|fields',
 _other = ['epbc_[0-9]+|epbcs',
           'lcbc_[0-9]+|lcbcs', 'nbc_[0-9]+|nbcs',
           'ic_[0-9]+|ics', 'function_[0-9]+|functions', 'options',
-          'integral_[0-9]+|integrals', 'region_aliases']
+          'integral_[0-9]+|integrals']
 
 def get_standard_keywords():
     return copy(_required), copy(_other)
@@ -252,26 +252,6 @@ def transform_functions(adict):
             d2['function_'+c2.name] = c2
     return d2
 
-def transform_region_aliases(adict):
-    """
-    Transform the ``region_aliases`` configuration dictionary into a
-    :class:`~sfepy.discrete.region_aliases.RegionAliasRegistry` instance.
-
-    Accepts either a dictionary or a pre-built ``RegionAliasRegistry``.
-    The dictionary may use any format accepted by
-    :meth:`RegionAliasRegistry.update`.
-    """
-    from sfepy.discrete.region_aliases import RegionAliasRegistry
-
-    if isinstance(adict, RegionAliasRegistry):
-        return adict
-
-    if isinstance(adict, dict):
-        return RegionAliasRegistry(adict)
-
-    raise ValueError('region_aliases must be a dict or RegionAliasRegistry,'
-                     ' got %r' % type(adict))
-
 def transform_to_struct_1(adict):
     return dict_to_struct(adict, flag=(1,))
 def transform_to_i_struct_1(adict):
@@ -286,7 +266,6 @@ transforms = {
     'solvers'   : transform_solvers,
     'integrals' : transform_integrals,
     'regions'   : transform_regions,
-    'region_aliases' : transform_region_aliases,
     'fields'    : transform_fields,
     'variables' : transform_variables,
     'ebcs'      : transform_ebcs,

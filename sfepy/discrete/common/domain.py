@@ -6,9 +6,6 @@ from sfepy.base.timing import Timer
 from sfepy.discrete.common.region import (Region, get_dependency_graph,
                                           sort_by_dependency, get_parents)
 from sfepy.discrete.parse_regions import create_bnf, visit_stack, ParseException
-from sfepy.discrete.region_aliases import (
-    RegionAliasRegistry, expand_region_aliases, is_alias_expression,
-)
 
 
 def region_leaf(domain, regions, rdef, functions, tdim):
@@ -192,8 +189,6 @@ class Domain(Struct):
         self.regions = OneTypeList(Region)
         self._region_stack = []
         self._bnf = create_bnf(self._region_stack)
-        if getattr(self, 'aliases', None) is None:
-            self.aliases = RegionAliasRegistry()
 
     def create_extra_tdim_region(self, region, functions, tdim):
         from sfepy.discrete.fem.geometry_element import (GeometryElement,
@@ -245,59 +240,13 @@ class Domain(Struct):
 
         return region
 
-    def set_aliases(self, aliases=None):
-        """
-        Attach a :class:`RegionAliasRegistry` (or a dict-compatible
-        collection) of region aliases to the domain.
-
-        After this call, every subsequent
-        :meth:`create_region` / :meth:`create_regions` call expands
-        ``a.<name>`` references found in selector strings using the
-        registered aliases before the selector is parsed.
-        """
-        if aliases is None:
-            self.aliases = RegionAliasRegistry()
-        elif isinstance(aliases, RegionAliasRegistry):
-            self.aliases = aliases
-        else:
-            self.aliases = RegionAliasRegistry(aliases)
-        return self.aliases
-
     def create_region(self, name, select, kind='cell', parent=None,
                       check_parents=True, extra_options=None, functions=None,
-                      add_to_regions=True, allow_empty=False,
-                      aliases=None):
+                      add_to_regions=True, allow_empty=False):
         """
         Region factory constructor. Append the new region to
         self.regions list.
-
-        Parameters
-        ----------
-        aliases : RegionAliasRegistry or dict, optional
-            Aliases used to expand ``a.<name>`` references in *select*
-            before parsing.  Defaults to ``self.aliases``.
         """
-        if aliases is None:
-            aliases = getattr(self, 'aliases', None)
-
-        original_select = select
-        if aliases is not None:
-            try:
-                select = expand_region_aliases(select, aliases)
-            except Exception as exc:
-                raise ValueError(
-                    'failed to expand aliases in region %r select %r: %s'
-                    % (name, select, exc))
-
-            # If the entire original selector was a single alias
-            # expression (optionally with parameters), record the
-            # mapping so downstream consumers can reference the region
-            # using the same expression.
-            orig_stripped = original_select.strip()
-            if is_alias_expression(orig_stripped) is not None:
-                if isinstance(aliases, RegionAliasRegistry):
-                    aliases.record_materialized(orig_stripped, name)
-
         if check_parents:
             parents = get_parents(select)
             for p in parents:
@@ -349,34 +298,11 @@ class Domain(Struct):
 
         return region
 
-    def create_regions(self, region_defs, functions=None, allow_empty=False,
-                       aliases=None):
+    def create_regions(self, region_defs, functions=None, allow_empty=False):
         output('creating regions...')
         timer = Timer(start=True)
 
-        if aliases is None:
-            aliases = getattr(self, 'aliases', None)
-        else:
-            self.set_aliases(aliases)
-
         self.reset_regions()
-
-        ##
-        # Expand alias references (``a.<name>``) in selector strings so
-        # that the dependency graph and the BNF parser only see fully
-        # materialized selectors.
-        if aliases is not None:
-            expanded_defs = {}
-            for key, rdef in region_defs.items():
-                new = rdef.copy()
-                try:
-                    new.select = expand_region_aliases(rdef.select, aliases)
-                except Exception as exc:
-                    raise ValueError(
-                        'failed to expand aliases in region %r select %r: %s'
-                        % (rdef.name, rdef.select, exc))
-                expanded_defs[key] = new
-            region_defs = expanded_defs
 
         ##
         # Sort region definitions by dependencies.

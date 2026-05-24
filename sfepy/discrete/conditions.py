@@ -6,7 +6,6 @@ import numpy as nm
 
 from sfepy.base.base import Container, Struct, is_sequence
 from sfepy.discrete.functions import Function
-from sfepy.discrete.region_aliases import resolve_alias_region_names
 
 def get_condition_value(val, functions, kind, name):
     """
@@ -52,35 +51,30 @@ class Conditions(Container):
     Container for various conditions.
     """
     @staticmethod
-    def from_conf(conf, regions, aliases=None):
+    def from_conf(conf, regions):
         conds = []
         for key, cc in conf.items():
             times = cc.get('times', None)
 
-            if aliases is not None:
-                cc_region = resolve_alias_region_names(cc.region, aliases,
-                                                       regions=regions)
-            else:
-                cc_region = cc.region
 
 
             if key.startswith("ebc"):
-                region = _get_region(cc_region, regions, cc.name)
+                region = _get_region(cc.region, regions, cc.name)
                 cond = EssentialBC(cc.name, region, cc.dofs, key=key,
                                    times=times)
 
             elif key.startswith("epbc"):
-                rs = [_get_region(ii, regions, cc.name) for ii in cc_region]
+                rs = [_get_region(ii, regions, cc.name) for ii in cc.region]
                 cond = PeriodicBC(cc.name, rs, cc.dofs, cc.match, key=key,
                                    times=times)
 
             elif key.startswith('lcbc'):
-                if isinstance(cc_region, str):
-                    rs = [_get_region(cc_region, regions, cc.name), None]
+                if isinstance(cc.region, str):
+                    rs = [_get_region(cc.region, regions, cc.name), None]
 
                 else:
                     rs = [_get_region(ii, regions, cc.name)
-                          for ii in cc_region]
+                          for ii in cc.region]
 
                 cond = LinearCombinationBC(cc.name, rs, cc.dofs,
                                            cc.dof_map_fun, cc.kind,
@@ -89,17 +83,17 @@ class Conditions(Container):
                                            arguments=cc.get('arguments', None))
 
             elif key.startswith('dgebc'):
-                region = _get_region(cc_region, regions, cc.name)
+                region = _get_region(cc.region, regions, cc.name)
                 cond = DGEssentialBC(cc.name, region, cc.dofs, key=key,
                                      times=times)
 
             elif key.startswith('dgepbc'):
-                rs = [_get_region(ii, regions, cc.name) for ii in cc_region]
+                rs = [_get_region(ii, regions, cc.name) for ii in cc.region]
                 cond = DGPeriodicBC(cc.name, rs, cc.dofs, cc.match, key=key,
                                     times=times)
 
             elif 'ic' in key:
-                region = _get_region(cc_region, regions, cc.name)
+                region = _get_region(cc.region, regions, cc.name)
                 cond = InitialCondition(cc.name, region, cc.dofs, key=key)
 
             else:

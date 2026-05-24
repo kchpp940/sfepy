@@ -6,9 +6,6 @@ from sfepy.base.base import assert_, Struct
 from sfepy.base.compat import in1d
 
 _depends = re.compile(r'r\.([a-zA-Z_\-0-9.]+)').findall
-_depends_alias = re.compile(
-    r'a\.([A-Za-z_][A-Za-z0-9_]*)(?:\[[^\]]*\])?'
-).findall
 
 def get_parents(selector):
     """
@@ -17,12 +14,6 @@ def get_parents(selector):
     parents = _depends(selector)
 
     return parents
-
-def get_alias_refs(selector):
-    """
-    Return alias names referenced in a region selector.
-    """
-    return list(_depends_alias(selector))
 
 def get_dependency_graph(region_defs):
     """
