@@ -159,8 +159,9 @@ def compose_data_files() -> list:
     ]
     test_files = [('sfepy/tests', glob.glob('sfepy/tests/*.py'))]
     mesh_data_files = data_dir_walk('meshes', 'sfepy')
+    example_files = data_dir_walk('examples', 'sfepy')
 
-    return data_files + test_files + mesh_data_files
+    return data_files + test_files + mesh_data_files + example_files
 
 
 def cmake_bool(py_bool: bool) -> str:
@@ -241,13 +242,6 @@ def setup_package():
         install_requires=install_requires,
         cmdclass=cmdclass,
         packages=find_packages(),
-        include_package_data=True,
-        package_data={
-            'sfepy': [
-                'examples/**/*',
-                'tests/*.py',
-            ],
-        },
         data_files=compose_data_files(),
         setup_requires=['cython'],
         cmake_args=compose_cmake_args(),

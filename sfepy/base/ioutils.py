@@ -6,7 +6,6 @@ import fnmatch
 import shutil
 import glob
 from .base import output, ordered_iteritems, Struct
-from .resources import resolve_resource
 import pickle
 import warnings
 import scipy.sparse as sp
@@ -21,18 +20,14 @@ class InDir(Struct):
     Store the directory name a file is in, and prepend this name to other
     files.
 
-    The directory is resolved using :func:`sfepy.base.resources.resolve_resource`
-    so that it works correctly when running from a source tree, an installed
-    package, or an arbitrary working directory.
-
     Examples
     --------
 
     >>> indir = InDir('output/file1')
-    >>> print(indir('file2'))
+    >>> print indir('file2')
     """
     def __init__(self, filename):
-        self.dir = op.split(op.realpath(resolve_resource(filename)))[0]
+        self.dir = op.split(op.join(os.getcwd(), filename))[0]
 
     def __call__(self, filename):
         return op.join(self.dir, filename)

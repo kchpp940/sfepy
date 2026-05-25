@@ -5,7 +5,7 @@ homogenization techniques.
 A reference periodic cell contains two domains: the stiff matrix :math:`Y_m`
 and the soft (but heavy) inclusion :math:`Y_c`.
 """
-from sfepy import data_dir, resolve_mesh, resolve_output
+from sfepy import data_dir
 from sfepy.base.base import Struct
 from sfepy.base.ioutils import InDir
 from sfepy.homogenization.coefficients import Coefficients
@@ -17,9 +17,9 @@ clip, clip_sqrt # Make pyflakes happy...
 
 incwd = InDir(__file__)
 
-filename = resolve_mesh('2d/special/circle_in_square.mesh')
+filename = data_dir + '/meshes/2d/special/circle_in_square.mesh'
 
-output_dir = resolve_output('output/band_gaps')
+output_dir = incwd('output/band_gaps')
 
 # aluminium, SI units
 D_m = get_pars(2, 5.898e10, 2.681e10)

@@ -11,7 +11,7 @@ from functools import partial
 import numpy as nm
 import matplotlib.pyplot as plt
 
-from sfepy import resolve_mesh
+from sfepy import data_dir
 from sfepy.base.base import output, assert_
 from sfepy.base.timing import Timer
 from sfepy.discrete import FieldVariable, Material, Integral
@@ -73,8 +73,8 @@ def main():
 
     output('max. order:', options.max_order)
 
-    mesh = Mesh.from_file(resolve_mesh('elements/%s_1.mesh'
-                          % options.geometry))
+    mesh = Mesh.from_file(data_dir + '/meshes/elements/%s_1.mesh'
+                          % options.geometry)
     domain = FEDomain('domain', mesh)
     omega = domain.create_region('Omega', 'all')
 

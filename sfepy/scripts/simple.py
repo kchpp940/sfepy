@@ -43,9 +43,6 @@ repeated runs for varying some of the simulation parameters - see
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 
 import sfepy
-from sfepy.base.base import output, Struct
-from sfepy.base.conf import ProblemConf, get_standard_keywords
-from sfepy.applications import PDESolverApp, EVPSolverApp
 
 def print_terms():
     import sfepy.terms as t
@@ -191,6 +188,12 @@ def main():
                         default=None, help=helps['list'])
     group.add_argument('filename_in', nargs='?')
     options, petsc_opts = parser.parse_known_args()
+
+    sfepy.preflight_check(exit_on_fail=2, groups='solver')
+
+    from sfepy.base.base import output, Struct
+    from sfepy.base.conf import ProblemConf, get_standard_keywords
+    from sfepy.applications import PDESolverApp, EVPSolverApp
 
     if options._list is not None:
         if options._list == 'terms':

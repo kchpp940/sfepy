@@ -16,7 +16,7 @@ Viewing the results::
 """
 import os.path as osp
 import numpy as nm
-from sfepy import data_dir, resolve_mesh
+from sfepy import data_dir
 from sfepy.mechanics.matcoefs import stiffness_from_youngpoisson
 from sfepy.base.base import Struct
 from sfepy.discrete import Problem
@@ -50,12 +50,12 @@ def test_meshes(pb0):
         displ = []
         for mesh in mesh_group:
             if isinstance(mesh, tuple):
-                fname = resolve_mesh(osp.join('3d', mesh[0]))
+                fname = osp.join(data_dir, 'meshes', '3d', mesh[0])
                 angle = mesh[1]
                 global_dict['mesh_hook_param'] = (fname, angle)
                 conf.filename_mesh = UserMeshIO(mesh_hook)
             else:
-                conf.filename_mesh = resolve_mesh(osp.join('3d', mesh))
+                conf.filename_mesh = osp.join(data_dir, 'meshes', '3d', mesh)
 
             pb = Problem.from_conf(conf)
             pb.set_output_dir(pb0.output_dir)
@@ -95,7 +95,7 @@ meshes = [
 ]
 
 def define():
-    filename_mesh = resolve_mesh(osp.join('3d', meshes[0][0]))
+    filename_mesh = osp.join(data_dir, 'meshes', '3d', meshes[0][0])
 
     options = {
         'post_process_hook': 'post_proces',

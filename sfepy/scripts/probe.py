@@ -45,12 +45,6 @@ from argparse import ArgumentParser, RawDescriptionHelpFormatter
 import numpy as nm
 
 import sfepy
-from sfepy.base.base import output, assert_
-from sfepy.base.ioutils import edit_filename
-from sfepy.base.conf import ProblemConf, get_standard_keywords
-from sfepy.discrete import Problem
-from sfepy.discrete.fem import MeshIO
-from sfepy.discrete.probes import write_results, read_results
 
 helps = {
     'debug':
@@ -84,6 +78,13 @@ def generate_probes(filename_input, filename_results, options,
     """
     Generate probe figures and data files.
     """
+    from sfepy.base.base import output, assert_
+    from sfepy.base.ioutils import edit_filename
+    from sfepy.base.conf import ProblemConf, get_standard_keywords
+    from sfepy.discrete import Problem
+    from sfepy.discrete.fem import MeshIO
+    from sfepy.discrete.probes import write_results, read_results
+
     if conf is None:
         required, other = get_standard_keywords()
         conf = ProblemConf.from_file(filename_input, required, other)
@@ -193,6 +194,9 @@ def postprocess(filename_input, filename_results, options):
     """
     Postprocess probe data files - replot, integrate data.
     """
+    from sfepy.base.base import output, assert_
+    from sfepy.discrete.probes import read_results
+
     from matplotlib import pyplot as plt
 
     header, results = read_results(filename_input,
@@ -262,6 +266,10 @@ def main():
     parser.add_argument('filename_in')
     parser.add_argument('filename_out')
     options = parser.parse_args()
+
+    sfepy.preflight_check(exit_on_fail=2, groups='postprocess')
+
+    from sfepy.base.base import output
 
     if options.debug:
         from sfepy.base.base import debug_on_error; debug_on_error()
