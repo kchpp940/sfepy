@@ -12,7 +12,6 @@ from argparse import ArgumentParser, Action, RawDescriptionHelpFormatter
 import matplotlib.pyplot as plt
 
 from sfepy.base.log import read_log, plot_log
-from sfepy.base.cli import add_output_filename_arg
 
 class ParseRc(Action):
     def __call__(self, parser, namespace, values, option_string=None):
@@ -42,8 +41,9 @@ def main():
     parser.add_argument('-g', '--groups', metavar='int[,int,...]',
                         action='store', dest='groups',
                         default=None, help=helps['groups'])
-    add_output_filename_arg(parser, dest='output_filename',
-                            help=helps['output_filename'])
+    parser.add_argument('-o', '--output', metavar='filename',
+                        action='store', dest='output_filename',
+                        default=None, help=helps['output_filename'])
     parser.add_argument('--rc', type=str, metavar='key:val,...',
                         action=ParseRc, dest='rc',
                         default={}, help=helps['rc'])

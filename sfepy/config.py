@@ -10,18 +10,26 @@ def get_top_dir():
     """
     import os.path as op
 
-    # If installed, up_dir is '.', otherwise (in (git) source directory) '..'.
-    for up_dir in ['..', '.']:
-        top_dir = op.normpath(op.realpath(op.join(op.dirname(__file__),
-                                                  up_dir)))
-        aux = op.join(top_dir, 'LICENSE')
-        if op.isfile(aux):
-            break
-    else:
-        print('Warning: cannot determine SfePy top level directory.')
-        up_dir = top_dir = ''
+    pkg_dir = op.normpath(op.realpath(op.dirname(__file__)))
 
-    in_source_tree = up_dir == '..'
+    candidates = []
+    for up_dir in ('..', '.'):
+        candidates.append(op.normpath(op.realpath(op.join(pkg_dir, up_dir))))
+    for prefix in (sys.prefix, sys.base_prefix):
+        candidates.append(op.normpath(op.realpath(op.join(prefix, 'sfepy'))))
+
+    top_dir = None
+    in_source_tree = False
+    for candidate in candidates:
+        if op.isfile(op.join(candidate, 'LICENSE')):
+            top_dir = candidate
+            rel = op.relpath(candidate, pkg_dir)
+            in_source_tree = (rel == '..')
+            break
+
+    if top_dir is None:
+        print('Warning: cannot determine SfePy top level directory.')
+        top_dir = pkg_dir
 
     return top_dir, in_source_tree
 

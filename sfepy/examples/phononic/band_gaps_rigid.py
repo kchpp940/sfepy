@@ -8,7 +8,7 @@ and the soft inclusion :math:`Y_c` enclosing the rigid heavy sub-inclusion
 """
 import numpy as nm
 
-from sfepy import data_dir
+from sfepy import data_dir, resolve_mesh, resolve_output
 from sfepy.base.base import Struct
 from sfepy.base.ioutils import InDir
 from sfepy.discrete.fem import extend_cell_data
@@ -25,13 +25,13 @@ incwd = InDir(__file__)
 dim = 2
 
 if dim == 3:
-    filename = data_dir + '/meshes/3d/special/cube_sphere.mesh'
+    filename = resolve_mesh('3d/special/cube_sphere.mesh')
 
 else:
-    filename = data_dir + '/meshes/2d/special/circle_in_square.mesh'
+    filename = resolve_mesh('2d/special/circle_in_square.mesh')
 
 
-output_dir = incwd('output/band_gaps_rigid')
+output_dir = resolve_output('output/band_gaps_rigid')
 
 # Rigid inclusion diameter.
 yr_diameter = 0.125

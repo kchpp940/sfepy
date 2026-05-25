@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 
 from sfepy.base.base import output
 from sfepy.base.conf import dict_from_string
-from sfepy.base.cli import add_version_arg
 from sfepy.discrete.fem import Mesh, FEDomain
 import sfepy.postprocess.plot_cmesh as pc
 
@@ -45,7 +44,7 @@ def main():
     default_wireframe_opts = "color='k'"
 
     parser = ArgumentParser(description=__doc__)
-    add_version_arg(parser)
+    parser.add_argument('--version', action='version', version='%(prog)s')
     parser.add_argument('--vertex-opts', metavar='dict-like',
                         action='store', dest='vertex_opts',
                         default=default_vertex_opts,

@@ -46,14 +46,6 @@ import sfepy
 from sfepy.base.base import output, Struct
 from sfepy.base.conf import ProblemConf, get_standard_keywords
 from sfepy.applications import PDESolverApp, EVPSolverApp
-from sfepy.base.cli import (
-    helps as _common_helps,
-    add_debug_arg,
-    add_output_format_arg,
-    add_output_filename_arg,
-    add_version_arg,
-    apply_debug_option,
-)
 
 def print_terms():
     import sfepy.terms as t
@@ -76,7 +68,8 @@ helps = {
     '         homogenized coefficients computed in parallel using MPI),'
     ' evp (eigenvalue problem),'
     ' phonon (phononic band gaps)',
-    'debug': _common_helps['debug'],
+    'debug':
+    'automatically start debugger when an exception is raised',
     'debug_mpi': 'log MPI communication (mM mode only)',
     'conf' :
     'override problem description file items, written as python'
@@ -86,7 +79,8 @@ helps = {
     'define' : 'pass given arguments written as python dictionary'
     ' without surrounding braces to define() function of problem description'
     ' file',
-    'filename' : _common_helps['filename'],
+    'filename' :
+    'basename of output file(s) [default: <basename of input file>]',
     'output_format' :
     'output file format, one of: {vtk, h5} [default: vtk]',
     'save_restart' :
@@ -126,11 +120,14 @@ helps = {
 def main():
     parser = ArgumentParser(description=__doc__,
                             formatter_class=RawDescriptionHelpFormatter)
-    add_version_arg(parser)
+    parser.add_argument('--version', action='version',
+                        version='%(prog)s ' + sfepy.__version__)
     parser.add_argument('-a', '--app', action='store', dest='app',
                         choices=['bvp', 'homogen', 'bvp-mM', 'evp', 'phonon'],
                         default=None, help= helps['app'])
-    add_debug_arg(parser)
+    parser.add_argument('--debug',
+                        action='store_true', dest='debug',
+                        default=False, help=helps['debug'])
     parser.add_argument('--debug-mpi',
                         action='store_true', dest='debug_mpi',
                         default=False, help=helps['debug_mpi'])
@@ -143,10 +140,12 @@ def main():
     parser.add_argument('-d', '--define', metavar='"key : value, ..."',
                         action='store', dest='define_args', type=str,
                         default=None, help=helps['define'])
-    add_output_filename_arg(parser, dest='output_filename_trunk',
-                            help=helps['filename'])
-    add_output_format_arg(parser, dest='output_format',
-                          help=helps['output_format'])
+    parser.add_argument('-o', metavar='filename',
+                        action='store', dest='output_filename_trunk',
+                        default=None, help=helps['filename'])
+    parser.add_argument('--format', metavar='format',
+                        action='store', dest='output_format',
+                        default=None, help=helps['output_format'])
     parser.add_argument('--save-restart', metavar='mode', type=int,
                         action='store', dest='save_restart',
                         default=None, help=helps['save_restart'])
@@ -205,7 +204,8 @@ def main():
     if not (options.analyze_dispersion or options.detect_band_gaps):
             options.plot = False
 
-    apply_debug_option(options)
+    if options.debug:
+        from sfepy.base.base import debug_on_error; debug_on_error()
 
     filename_in = options.filename_in
     output.set_output(filename=options.log,

@@ -11,10 +11,6 @@ from argparse import ArgumentParser, RawDescriptionHelpFormatter
 import numpy as nm
 
 from sfepy.base.base import output
-from sfepy.base.cli import (
-    add_output_filename_arg,
-    add_version_arg,
-)
 from sfepy.discrete.iga.domain_generators import gen_patch_block_domain
 import sfepy.discrete.iga.plot_nurbs as pn
 import sfepy.discrete.iga.io as io
@@ -127,8 +123,9 @@ def gen_iga_patch(options):
         pn.plt.show()
 
 def add_args(parser):
-    add_output_filename_arg(parser, dest='filename',
-                            help=helps['filename'])
+    parser.add_argument('-o', metavar='filename',
+                        action='store', dest='filename',
+                        default=None, help=helps['filename'])
     parser.add_argument('-d', '--dims', metavar='dims',
                         action='store', dest='dims',
                         default='[1.0, 1.0, 1.0]', help=helps['dims'])
@@ -161,7 +158,7 @@ def add_args(parser):
 def main():
     parser = ArgumentParser(description=__doc__,
                             formatter_class=RawDescriptionHelpFormatter)
-    add_version_arg(parser)
+    parser.add_argument('--version', action='version', version='%(prog)s')
     add_args(parser)
 
     options = parser.parse_args()

@@ -10,13 +10,12 @@ words to the expected ones.
 The output of failed commands is saved to 'test_install.log' file.
 """
 import time
+import os
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 import shlex
 import subprocess
 import logging
 import re
-
-from sfepy.base.cli import add_version_arg
 
 DEBUG_FMT = '*' * 55 + '\n%s\n' + '*' * 55
 
@@ -39,6 +38,47 @@ def _get_logger(filename='test_install.log'):
     return logger
 
 logger = _get_logger()
+
+def check_resource_location():
+    """
+    Verify that the resource location mechanism works correctly.
+
+    This checks that mesh data, example files, and the data directory
+    can be resolved regardless of the current working directory.
+    This is the minimum check that ensures pip-installed SfePy can
+    find its resources from an arbitrary working directory.
+    """
+    from sfepy import get_data_dir, get_pkg_dir, resolve_mesh, resolve_example
+
+    logger.info('--- resource location check ---')
+
+    data_dir = get_data_dir()
+    logger.info('  data_dir: %s', data_dir)
+    if not os.path.isdir(data_dir):
+        logger.error('  data_dir does not exist: %s', data_dir)
+        return False
+
+    pkg_dir = get_pkg_dir()
+    logger.info('  pkg_dir:  %s', pkg_dir)
+    if not os.path.isdir(pkg_dir):
+        logger.error('  pkg_dir does not exist: %s', pkg_dir)
+        return False
+
+    mesh_path = resolve_mesh('3d/cylinder.mesh')
+    logger.info('  mesh:     %s', mesh_path)
+    if not os.path.isfile(mesh_path):
+        logger.error('  mesh not found: %s', mesh_path)
+        return False
+
+    example_path = resolve_example('diffusion/poisson.py')
+    logger.info('  example:  %s', example_path)
+    if not os.path.isfile(example_path):
+        logger.error('  example not found: %s', example_path)
+        return False
+
+    logger.info('  resource location check: OK')
+    return True
+
 
 def check_output(cmd):
     """
@@ -188,11 +228,15 @@ def report_tests(out, return_item=False):
 def main():
     parser = ArgumentParser(description=__doc__,
                             formatter_class=RawDescriptionHelpFormatter)
-    add_version_arg(parser)
+    parser.add_argument('--version', action='version', version='%(prog)s')
     parser.parse_args()
 
     fd = open('test_install.log', 'w')
     fd.close()
+
+    if not check_resource_location():
+        logger.error('resource location check failed!')
+        return 1
 
     eok = 0
 

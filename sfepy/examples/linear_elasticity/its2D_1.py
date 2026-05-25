@@ -17,7 +17,7 @@ where
 """
 from sfepy.mechanics.matcoefs import stiffness_from_youngpoisson
 from sfepy.discrete.fem.utils import refine_mesh
-from sfepy import data_dir
+from sfepy import data_dir, resolve_output
 
 # Fix the mesh file name if you run this file outside the SfePy directory.
 filename_mesh = data_dir + '/meshes/2d/its2D.mesh'
@@ -25,7 +25,7 @@ filename_mesh = data_dir + '/meshes/2d/its2D.mesh'
 refinement_level = 0
 filename_mesh = refine_mesh(filename_mesh, refinement_level)
 
-output_dir = '.' # set this to a valid directory you have write access to
+output_dir = resolve_output('')  # set this to a valid directory you have write access to
 
 young = 2000.0 # Young's modulus [MPa]
 poisson = 0.4  # Poisson's ratio

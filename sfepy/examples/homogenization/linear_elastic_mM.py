@@ -3,7 +3,7 @@ Linear elasticity with effective macroscopic properties determined
 according to the theory of homogenization from a periodic microstructure.
 """
 import os
-from sfepy import data_dir, base_dir
+from sfepy import data_dir, resolve_mesh, resolve_example
 from sfepy.base.base import nm
 from sfepy.homogenization.micmac import get_homog_coefs_linear
 from sfepy.homogenization.recovery import save_recovery_region,\
@@ -64,7 +64,7 @@ functions = {
     'get_homog' : (get_homog,),
 }
 
-filename_mesh = data_dir + '/meshes/3d/cylinder.mesh'
+filename_mesh = resolve_mesh('3d/cylinder.mesh')
 
 regions = {
     'Omega' : 'all',
@@ -108,8 +108,9 @@ solvers = {
     }),
 }
 
-micro_filename = base_dir \
-                 + '/examples/homogenization/linear_homogenization_up.py'
+micro_filename = resolve_example(
+    'homogenization/linear_homogenization_up.py'
+)
 
 options = {
     'nls' : 'newton',

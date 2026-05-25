@@ -22,16 +22,11 @@ from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from sfepy.base.conf import dict_from_string as parse_as_dict
 from sfepy.discrete.fem import Mesh
 from sfepy.discrete.fem.meshio import MeshIO
-from sfepy.base.cli import (
-    helps as _common_helps,
-    add_mesh_format_arg,
-    add_output_filename_arg,
-    add_version_arg,
-)
 
 helps = {
-    'filename' : _common_helps['output_filename'],
-    'format' : _common_helps['format'],
+    'filename' :
+    'output file name [default: %(default)s]',
+    'format' : 'output mesh format (overrides output file name extension)',
     'meshes' :
     'mesh filenames and coordinates where their centres should be placed',
 }
@@ -60,8 +55,12 @@ def combine_meshes(options):
     combined_mesh.write(options.output_filename, io=io)
 
 def add_args(parser):
-    add_output_filename_arg(parser, default='out.vtk', help=helps['filename'])
-    add_mesh_format_arg(parser, help=helps['format'])
+    parser.add_argument('-o', metavar='filename',
+                        action='store', dest='output_filename',
+                        default='out.vtk', help=helps['filename'])
+    parser.add_argument('-f', '--format', metavar='format',
+                        action='store', type=str, dest='format',
+                        default=None, help=helps['format'])
     parser.add_argument(metavar='filename=[x,y,z]', nargs='+',
                         action='store', dest='meshes',
                         help=helps['meshes'])
@@ -69,7 +68,7 @@ def add_args(parser):
 def main():
     parser = ArgumentParser(description=__doc__,
                             formatter_class=RawDescriptionHelpFormatter)
-    add_version_arg(parser)
+    parser.add_argument('--version', action='version', version='%(prog)s')
     add_args(parser)
 
     options = parser.parse_args()

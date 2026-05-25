@@ -12,17 +12,11 @@ import numpy as nm
 from sfepy.base.base import output
 from sfepy.mesh.mesh_generators import gen_block_mesh
 from sfepy.discrete.fem.meshio import check_format_suffix, MeshIO
-from sfepy.base.cli import (
-    helps as _common_helps,
-    add_mesh_format_arg,
-    add_output_filename_arg,
-    add_version_arg,
-    set_output_prefix,
-)
 
 helps = {
-    'filename' : _common_helps['output_filename'],
-    'format' : _common_helps['format'],
+    'filename' :
+    'output file name [default: %(default)s]',
+    'format' : 'output mesh format (overrides output file name extension)',
     'dims' :
     'dimensions  of the block [default: %(default)s]',
     'shape' :
@@ -41,7 +35,7 @@ def gen_block(options):
     shape = nm.array(eval(options.shape), dtype=nm.int32)[:dim]
     centre = nm.array(eval(options.centre), dtype=nm.float64)[:dim]
 
-    set_output_prefix('blockgen:')
+    output.prefix = 'blockgen:'
     output('dimensions:', dims)
     output('shape:', shape)
     output('centre:', centre)
@@ -58,8 +52,12 @@ def gen_block(options):
     mesh.write(options.output_filename, io=io)
 
 def add_args(parser):
-    add_output_filename_arg(parser, default='out.vtk', help=helps['filename'])
-    add_mesh_format_arg(parser, help=helps['format'])
+    parser.add_argument('-o', metavar='filename',
+                        action='store', dest='output_filename',
+                        default='out.vtk', help=helps['filename'])
+    parser.add_argument('-f', '--format', metavar='format',
+                        action='store', type=str, dest='format',
+                        default=None, help=helps['format'])
     parser.add_argument('-d', '--dims', metavar='dims',
                         action='store', dest='dims',
                         default='[1.0, 1.0, 1.0]', help=helps['dims'])
@@ -75,7 +73,7 @@ def add_args(parser):
 
 def main():
     parser = ArgumentParser(description=__doc__)
-    add_version_arg(parser)
+    parser.add_argument('--version', action='version', version='%(prog)s')
     add_args(parser)
 
     options = parser.parse_args()

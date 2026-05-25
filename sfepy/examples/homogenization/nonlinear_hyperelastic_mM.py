@@ -8,7 +8,7 @@ Run in parallel using::
 """
 import numpy as nm
 
-from sfepy import data_dir, base_dir
+from sfepy import data_dir, resolve_mesh, resolve_example
 from sfepy.base.base import Struct, output
 from sfepy.terms.terms_hyperelastic_ul import HyperElasticULFamilyData
 from sfepy.homogenization.micmac import get_homog_coefs_nonlinear
@@ -140,8 +140,8 @@ options = {
     'mesh_update_variables': ['u'],
     'nls_iter_hook': ulf_iteration_hook,
     'pre_process_hook': ulf_init,
-    'micro_filename': (base_dir +
-                       '/examples/homogenization/nonlinear_homogenization.py'),
+    'micro_filename': resolve_example(
+        'homogenization/nonlinear_homogenization.py'),
     'recover_micro': True,
     'recovery_region': 'Recovery',
     'post_process_hook': post_process,
@@ -161,7 +161,7 @@ variables = {
     'v': ('test field', 'displacement', 'u'),
 }
 
-filename_mesh = data_dir + '/meshes/2d/its2D.mesh'
+filename_mesh = resolve_mesh('2d/its2D.mesh')
 
 regions = {
     'Omega': 'all',
