@@ -4,22 +4,14 @@ Multiprocessing functions.
 import logging
 import os
 
-from sfepy.base.deps import dep_manager
-
-_mpi4py = dep_manager.optional_import('mpi4py')
-
-if _mpi4py is None:
-    use_multiprocessing = False
-    MPI = None
-    mpi_comm = None
-    mpi_rank = 0
-    mpi_status = None
-else:
-    MPI = _mpi4py.MPI
+try:
+    from mpi4py import MPI
     mpi_comm = MPI.COMM_WORLD
     mpi_rank = mpi_comm.Get_rank()
     mpi_status = MPI.Status()
     use_multiprocessing = mpi_comm.Get_size() > 1
+except:
+    use_multiprocessing = False
 
 
 global_multiproc_dict = {}
@@ -80,10 +72,7 @@ def set_logging_level(log_level='info'):
 
 def get_logger(log_filename='multiproc_mpi.log'):
     """Get the MPI logger which log information into a shared file."""
-    if not use_multiprocessing or MPI is None:
-        return _get_stub_logger()
-
-    open(log_filename, 'w').close()  # empty log file
+    open(log_filename, 'w').close()  # empy log file
 
     log_id = 'master' if mpi_rank == 0 else 'slave%d' % mpi_comm.rank
     logger = logging.getLogger(log_id)
@@ -95,14 +84,6 @@ def get_logger(log_filename='multiproc_mpi.log'):
     mh.setFormatter(formatter)
     logger.addHandler(mh)
 
-    return logger
-
-
-def _get_stub_logger():
-    """Return a no-op logger used when MPI is unavailable."""
-    logger = logging.getLogger('multiproc_mpi')
-    if not logger.handlers:
-        logger.setLevel(logging.INFO)
     return logger
 
 

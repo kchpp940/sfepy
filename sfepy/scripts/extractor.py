@@ -25,6 +25,13 @@ import sfepy
 from sfepy.base.base import nm, dict_to_struct, get_default, Struct
 from sfepy.base.ioutils import get_trunk
 import sfepy.postprocess.time_history as th
+from sfepy.base.cli import (
+    helps as _common_helps,
+    add_debug_arg,
+    add_output_filename_arg,
+    add_version_arg,
+    apply_debug_option,
+)
 
 def create_problem(filename):
     from sfepy.discrete import Problem
@@ -51,10 +58,8 @@ def parse_linearization(linearization):
     return dict_to_struct(out)
 
 helps = {
-    'debug':
-    'automatically start debugger when an exception is raised',
-    'filename' :
-    'basename of output file(s) [default: <basename of input file>]',
+    'debug': _common_helps['debug'],
+    'filename' : _common_helps['filename'],
     'dump' :
     'dump to sequence of VTK files',
     'same_dir' :
@@ -82,14 +87,10 @@ helps = {
 def main():
     parser = ArgumentParser(description=__doc__,
                             formatter_class=RawDescriptionHelpFormatter)
-    parser.add_argument('--version', action='version',
-                        version='%(prog)s ' + sfepy.__version__)
-    parser.add_argument('--debug',
-                        action='store_true', dest='debug',
-                        default=False, help=helps['debug'])
-    parser.add_argument('-o', metavar='filename',
-                        action='store', dest='output_filename_trunk',
-                        default=None, help=helps['filename'])
+    add_version_arg(parser)
+    add_debug_arg(parser)
+    add_output_filename_arg(parser, dest='output_filename_trunk',
+                            help=helps['filename'])
     parser.add_argument('-d', '--dump', action='store_true', dest='dump',
                         default=False, help=helps['dump'])
     parser.add_argument('--same-dir', action='store_true', dest='same_dir',
@@ -117,8 +118,7 @@ def main():
     parser.add_argument('results_file')
     options = parser.parse_args()
 
-    if options.debug:
-        from sfepy.base.base import debug_on_error; debug_on_error()
+    apply_debug_option(options)
 
     filename_in = options.input_file
     filename_results = options.results_file

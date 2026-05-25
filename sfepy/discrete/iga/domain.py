@@ -6,19 +6,10 @@ import os.path as op
 import numpy as nm
 
 from sfepy.base.base import assert_, Struct
-from sfepy.base.deps import dep_manager
 from sfepy.discrete.common.domain import Domain
 from sfepy.discrete.iga import iga
 from sfepy.discrete.iga import io
-
-# Import compiled IGA helpers through the central registry.
-try:
-    from sfepy.discrete.iga.extmods.igac import eval_in_tp_coors  # noqa: F401
-except (ImportError, AttributeError) as exc:
-    dep_manager.require(
-        'c-ext-iga',
-        context='sfepy.discrete.iga.domain import failed: %s' % exc,
-    )
+from sfepy.discrete.iga.extmods.igac import eval_in_tp_coors
 
 class NurbsPatch(Struct):
     """

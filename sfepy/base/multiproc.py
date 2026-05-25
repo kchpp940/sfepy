@@ -1,17 +1,10 @@
 """
 Multiprocessing functions.
 """
-from sfepy.base.deps import dep_manager
-
-# Probe mpi4py through the central registry so that missing MPI gives
-# a consistent install hint everywhere in the codebase.
-_MPI = dep_manager.optional_import('mpi4py')
-if _MPI is not None:
-    try:
-        use_multiprocessing_mpi = _MPI.COMM_WORLD.Get_size() > 1
-    except Exception:
-        use_multiprocessing_mpi = False
-else:
+try:
+    from mpi4py import MPI
+    use_multiprocessing_mpi = MPI.COMM_WORLD.Get_size() > 1
+except ImportError:
     use_multiprocessing_mpi = False
 
 try:

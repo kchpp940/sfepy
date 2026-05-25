@@ -1,17 +1,7 @@
 import numpy as nm
 
 from sfepy.base.base import assert_
-from sfepy.base.deps import dep_manager
-
-# Import the compiled term helpers through the central registry so
-# that a missing C extension yields a consistent install hint.
-try:
-    from sfepy.terms.extmods import terms  # noqa: F401
-except (ImportError, AttributeError) as exc:
-    dep_manager.require(
-        'c-ext-terms.terms',
-        context='sfepy.discrete.evaluate_variable import failed: %s' % exc,
-    )
+from sfepy.terms.extmods import terms
 
 def eval_real(vec, conn, geo, mode, shape, bf=None):
     """

@@ -11,6 +11,7 @@ import numpy as nm
 
 from sfepy.base.base import output, Struct
 from sfepy.base.ioutils import get_print_info, ensure_path
+from sfepy.base.cli import add_version_arg
 from sfepy.discrete import FieldVariable, Variables, PolySpace
 from sfepy.discrete.fem import Mesh, FEDomain, Field
 from sfepy.discrete.fem.geometry_element import GeometryElement
@@ -120,7 +121,7 @@ def save_basis_on_mesh(mesh, options, output_dir, lin,
 
 def main():
     parser = ArgumentParser(description=__doc__)
-    parser.add_argument('--version', action='version', version='%(prog)s')
+    add_version_arg(parser)
     parser.add_argument('-b', '--basis', metavar='name',
                         action='store', dest='basis',
                         default='lagrange', help=helps['basis'])

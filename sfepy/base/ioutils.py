@@ -6,14 +6,14 @@ import fnmatch
 import shutil
 import glob
 from .base import output, ordered_iteritems, Struct
-from .deps import dep_manager
 import pickle
 import warnings
 import scipy.sparse as sp
 
-# Import PyTables through the central registry so that a missing pytables
-# produces a single, consistent install hint.
-pt = dep_manager.optional_import('tables')
+try:
+    import tables as pt
+except:
+    pt = None
 
 class InDir(Struct):
     """

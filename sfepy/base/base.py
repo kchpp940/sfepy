@@ -23,11 +23,12 @@ def get_debug():
     """
     Utility function providing ``debug()`` function.
     """
-    from sfepy.base.deps import dep_manager
-    IPython = dep_manager.optional_import('IPython')
+    try:
+        import IPython
 
-    if IPython is None:
+    except ImportError:
         debug = None
+
     else:
         old_excepthook = sys.excepthook
 
@@ -89,19 +90,13 @@ def debug_on_error():
     """
     Start debugger at the line where an exception was raised.
     """
-    from sfepy.base.deps import dep_manager
-    IPython = dep_manager.optional_import('IPython')
+    try:
+        from IPython.core import ultratb
 
-    if IPython is not None:
-        try:
-            from IPython.core import ultratb
+        except_hook = ultratb.FormattedTB(mode='Verbose',
+                                          color_scheme='Linux', call_pdb=1)
 
-            except_hook = ultratb.FormattedTB(mode='Verbose',
-                                              color_scheme='Linux', call_pdb=1)
-        except ImportError:
-            IPython = None
-
-    if IPython is None:
+    except ImportError:
         def except_hook(etype, value, tb):
             if hasattr(sys, 'ps1') or not sys.stderr.isatty():
                 # We are in interactive mode or we don't have a tty-like
@@ -200,11 +195,6 @@ def python_shell(frame=0):
     code.interact(local=frame.f_locals)
 
 def ipython_shell(frame=0):
-    from sfepy.base.deps import dep_manager
-    IPython = dep_manager.require(
-        'IPython',
-        context='ipython_shell: IPython is required for the interactive shell',
-    )
     from IPython.terminal.embed import InteractiveShellEmbed
     ipshell = InteractiveShellEmbed()
 
@@ -214,13 +204,10 @@ def shell(frame=0):
     """
     Embed an IPython (if available) or regular Python shell in the given frame.
     """
-    from sfepy.base.deps import dep_manager
-    if dep_manager.available('IPython'):
-        try:
-            ipython_shell(frame=frame+2)
-        except Exception:
-            python_shell(frame=frame+1)
-    else:
+    try:
+        ipython_shell(frame=frame+2)
+
+    except ImportError:
         python_shell(frame=frame+1)
 
 def assert_(condition, msg='assertion failed!'):

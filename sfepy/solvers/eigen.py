@@ -278,12 +278,12 @@ class LOBPCGEigenvalueSolver(EigenvalueSolver):
         return out
 
 def init_slepc_args():
-    from sfepy.base.deps import dep_manager
-    slepc4py = dep_manager.optional_import('slepc4py')
-    if slepc4py is None:
+    try:
+        import sys, slepc4py
+
+    except ImportError:
         return
 
-    import sys
     argv = [arg for arg in sys.argv if arg not in ['-h', '--help']]
     slepc4py.init(argv)
 
@@ -318,21 +318,11 @@ class SLEPcEigenvalueSolver(EigenvalueSolver):
     ]
 
     def __init__(self, conf, comm=None, context=None, **kwargs):
-        from sfepy.base.deps import dep_manager
-
         if comm is None:
             init_slepc_args()
 
-        petsc = dep_manager.require(
-            'petsc4py.PETSc',
-            context='SLEPcEigenvalueSolver.__init__: PETSc is required '
-                    'for SLEPc eigenvalue solvers',
-        )
-        slepc = dep_manager.require(
-            'slepc4py',
-            context='SLEPcEigenvalueSolver.__init__: SLEPc is required '
-                    'for eigenvalue solvers',
-        )
+        from petsc4py import PETSc as petsc
+        from slepc4py import SLEPc as slepc
 
         EigenvalueSolver.__init__(self, conf, petsc=petsc, slepc=slepc,
                                   comm=comm, context=context, **kwargs)

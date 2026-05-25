@@ -1,18 +1,8 @@
 import numpy as nm
 
 from sfepy.base.base import output, Struct
-from sfepy.base.deps import dep_manager
 from sfepy.terms.terms import Term
-
-# Import compiled term helpers through the central registry.
-try:
-    from sfepy.terms.extmods import terms  # noqa: F401
-except (ImportError, AttributeError) as exc:
-    dep_manager.require(
-        'c-ext-terms.terms',
-        context='sfepy.terms.terms_contact import failed: %s' % exc,
-    )
-
+from sfepy.terms.extmods import terms
 import sfepy.mechanics.extmods.ccontres as cc
 
 class ContactInfo(Struct):

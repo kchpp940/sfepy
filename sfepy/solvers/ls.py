@@ -443,12 +443,11 @@ class PyAMGSolver(LinearSolver):
     _callbacks_res = ['gmres']
 
     def __init__(self, conf, **kwargs):
-        from sfepy.base.deps import dep_manager
-        pyamg = dep_manager.require(
-            'pyamg',
-            context='PyAMGSolver.__init__: the pyamg package is '
-                    'required for algebraic multigrid solvers',
-        )
+        try:
+            import pyamg
+        except ImportError:
+            msg =  'cannot import pyamg!'
+            raise ImportError(msg)
 
         LinearSolver.__init__(self, conf, mg=None, **kwargs)
 
@@ -540,13 +539,11 @@ class PyAMGKrylovSolver(LinearSolver):
     _callbacks_res = ['gmres']
 
     def __init__(self, conf, context=None, **kwargs):
-        from sfepy.base.deps import dep_manager
-        pyamg = dep_manager.require(
-            'pyamg',
-            context='PyAMGKrylovSolver.__init__: the pyamg package is '
-                    'required for Krylov subspace algebraic multigrid solvers',
-        )
-        krylov = pyamg.krylov
+        try:
+            import pyamg.krylov as krylov
+        except ImportError:
+            msg =  'cannot import pyamg.krylov!'
+            raise ImportError(msg)
 
         LinearSolver.__init__(self, conf, mg=None,
                               context=context, **kwargs)
@@ -673,15 +670,10 @@ class PETScKrylovSolver(LinearSolver):
     _precond_sides = {None : None, 'left' : 0, 'right' : 1, 'symmetric' : 2}
 
     def __init__(self, conf, comm=None, context=None, **kwargs):
-        from sfepy.base.deps import dep_manager
         if comm is None:
             from sfepy.parallel.parallel import init_petsc_args; init_petsc_args
 
-        petsc = dep_manager.require(
-            'petsc4py.PETSc',
-            context='PETScKrylovSolver.__init__: PETSc is required '
-                    'for the PETSc-based Krylov solver',
-        )
+        from petsc4py import PETSc as petsc
 
         converged_reasons = {}
         for key, val in petsc.KSP.ConvergedReason.__dict__.items():

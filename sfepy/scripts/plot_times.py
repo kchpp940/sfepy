@@ -9,6 +9,7 @@ from argparse import ArgumentParser
 import numpy as nm
 import matplotlib.pyplot as plt
 
+from sfepy.base.cli import add_version_arg
 from sfepy.postprocess.time_history import extract_times
 
 helps = {
@@ -18,7 +19,7 @@ helps = {
 
 def main():
     parser = ArgumentParser(description=__doc__)
-    parser.add_argument('--version', action='version', version='%(prog)s')
+    add_version_arg(parser)
     parser.add_argument('-l', '--logarithmic',
                         action='store_true', dest='logarithmic',
                         default=False, help=helps['logarithmic'])

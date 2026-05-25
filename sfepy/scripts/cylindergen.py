@@ -12,11 +12,17 @@ import numpy as nm
 from sfepy.base.base import output
 from sfepy.mesh.mesh_generators import gen_cylinder_mesh
 from sfepy.discrete.fem.meshio import check_format_suffix, MeshIO
+from sfepy.base.cli import (
+    helps as _common_helps,
+    add_mesh_format_arg,
+    add_output_filename_arg,
+    add_version_arg,
+    set_output_prefix,
+)
 
 helps = {
-    'filename' :
-    'output file name [default: %(default)s]',
-    'format' : 'output mesh format (overrides output file name extension)',
+    'filename' : _common_helps['output_filename'],
+    'format' : _common_helps['format'],
     'axis' :
     'axis of the cylinder, one of x, y, z [default: %(default)s]',
     'dims' :
@@ -37,7 +43,7 @@ helps = {
     'opening angle in radians [default: %(default)s]',
     'non_uniform' :
     'space the mesh nodes in radial direction so that the element'\
-    ' volumes are (approximately) the same, making thus the elements towards'\
+    ' volumes are (approximately) the same, making thus the elements towards'
     ' the outer surface thinner',
     '2d' :
     'set axis to z, length and all z coordinates to zero and generate'
@@ -49,7 +55,7 @@ def gen_cylinder(options):
     shape = nm.array(eval(options.shape), dtype=nm.int32)
     centre = nm.array(eval(options.centre), dtype=nm.float64)
 
-    output.prefix = 'cylindergen:'
+    set_output_prefix('cylindergen:')
     output('dimensions:', dims)
     output('shape:', shape)
     output('centre:', centre)
@@ -73,12 +79,8 @@ def gen_cylinder(options):
     mesh.write(options.output_filename, io=io)
 
 def add_args(parser):
-    parser.add_argument('-o', metavar = 'filename',
-                        action = "store", dest = "output_filename",
-                        default = 'out.vtk', help = helps['filename'])
-    parser.add_argument('-f', '--format', metavar='format',
-                        action='store', type=str, dest='format',
-                        default=None, help=helps['format'])
+    add_output_filename_arg(parser, default='out.vtk', help=helps['filename'])
+    add_mesh_format_arg(parser, help=helps['format'])
     parser.add_argument("-a", "--axis", metavar = 'axis',
                         action = "store", dest = "axis",
                         default = 'x', help = helps['axis'])
@@ -110,7 +112,7 @@ def add_args(parser):
 
 def main():
     parser = ArgumentParser(description=__doc__)
-    parser.add_argument('--version', action='version', version = "%(prog)s")
+    add_version_arg(parser)
     add_args(parser)
 
     options = parser.parse_args()

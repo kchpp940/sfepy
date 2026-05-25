@@ -10,6 +10,7 @@ import numpy as nm
 from scipy.sparse.csgraph import connected_components
 
 from sfepy.base.base import output
+from sfepy.base.cli import add_version_arg
 from sfepy.discrete.fem import Mesh, MeshIO, FEDomain
 
 def show_mesh_info(options):
@@ -99,7 +100,7 @@ def add_args(parser):
 def main():
     parser = ArgumentParser(description=__doc__.rstrip(),
                             formatter_class=RawDescriptionHelpFormatter)
-    parser.add_argument('--version', action='version', version='%(prog)s')
+    add_version_arg(parser)
     add_args(parser)
 
     options = parser.parse_args()

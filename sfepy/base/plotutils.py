@@ -1,18 +1,11 @@
 import numpy as nm
 
-from sfepy.base.deps import dep_manager
-
-# Import matplotlib through the central registry so that a single
-# standard install hint is shown wherever plotting is attempted.
-_matplotlib = dep_manager.optional_import('matplotlib')
-if _matplotlib is not None:
-    try:
-        import matplotlib.pyplot as plt
-        import matplotlib as mpl
-    except Exception:
-        plt = mpl = None
-else:
+try:
+    import matplotlib.pyplot as plt
+    import matplotlib as mpl
+except (ImportError, RuntimeError):
     plt = mpl = None
+    #print 'matplotlib import failed!'
 
 from sfepy.base.base import output, pause
 

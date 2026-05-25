@@ -6,6 +6,7 @@ import sys
 sys.path.append('.')
 from argparse import ArgumentParser
 
+from sfepy.base.cli import add_version_arg
 import sfepy.postprocess.plot_quadrature as pq
 
 helps = {
@@ -32,7 +33,7 @@ helps = {
 
 def main():
     parser = ArgumentParser(description=__doc__)
-    parser.add_argument('--version', action='version', version='%(prog)s')
+    add_version_arg(parser)
     parser.add_argument('-g', '--geometry', metavar='name',
                         action='store', dest='geometry',
                         default='2_4', help=helps['geometry'])

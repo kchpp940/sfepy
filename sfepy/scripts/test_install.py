@@ -16,6 +16,8 @@ import subprocess
 import logging
 import re
 
+from sfepy.base.cli import add_version_arg
+
 DEBUG_FMT = '*' * 55 + '\n%s\n' + '*' * 55
 
 def _get_logger(filename='test_install.log'):
@@ -186,7 +188,7 @@ def report_tests(out, return_item=False):
 def main():
     parser = ArgumentParser(description=__doc__,
                             formatter_class=RawDescriptionHelpFormatter)
-    parser.add_argument('--version', action='version', version='%(prog)s')
+    add_version_arg(parser)
     parser.parse_args()
 
     fd = open('test_install.log', 'w')

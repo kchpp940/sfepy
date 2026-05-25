@@ -19,6 +19,12 @@ from sfepy.discrete.fem import Mesh, FEDomain, Field
 from sfepy.terms import Term
 from sfepy.solvers import eig
 from sfepy.mechanics.matcoefs import stiffness_from_lame
+from sfepy.base.cli import (
+    helps as _common_helps,
+    add_output_dir_arg,
+    add_version_arg,
+    check_output_dir,
+)
 
 helps = {
     'basis' :
@@ -31,14 +37,14 @@ helps = {
     'reference element geometry, one of "2_3", "2_4", "3_4", "3_8"'
     ' [default: %(default)s]',
     'output_dir' :
-    'output directory',
+    _common_helps['output_dir'],
     'no_show' :
     'do not show the figures',
 }
 
 def main():
     parser = ArgumentParser(description=__doc__)
-    parser.add_argument('--version', action='version', version='%(prog)s')
+    add_version_arg(parser)
     parser.add_argument('-b', '--basis', metavar='name',
                         action='store', dest='basis',
                         default='lagrange', help=helps['basis'])
@@ -51,13 +57,13 @@ def main():
     parser.add_argument('-g', '--geometry', metavar='name',
                         action='store', dest='geometry',
                         default='2_4', help=helps['geometry'])
-    parser.add_argument('-o', '--output-dir', metavar='path',
-                        action='store', dest='output_dir',
-                        default=None, help=helps['output_dir'])
+    add_output_dir_arg(parser, help=helps['output_dir'])
     parser.add_argument('--no-show',
                         action='store_false', dest='show',
                         default=True, help=helps['no_show'])
     options = parser.parse_args()
+
+    check_output_dir(options.output_dir, create=True)
 
     dim, n_ep = int(options.geometry[0]), int(options.geometry[2])
     output('reference element geometry:')

@@ -4,12 +4,13 @@ Simple mesh generators and statistics.
 """
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 
+from sfepy.base.cli import add_version_arg
 from . import (blockgen, cylindergen, gen_iga_patch, combine_meshes,
                show_mesh_info)
 
 def main():
     parser = ArgumentParser(description=__doc__)
-    parser.add_argument('--version', action='version', version='%(prog)s')
+    add_version_arg(parser)
     subparsers = parser.add_subparsers(title='subcommands',
                                        description='valid subcommands',
                                        help='additional help',

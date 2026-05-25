@@ -5,31 +5,29 @@ import os
 
 import numpy as nm
 
-from sfepy.base.deps import dep_manager
-
-
 def init_petsc_args():
-    """
-    Initialise the PETSc command-line options (if PETSc is available).
-    If ``petsc4py`` is not installed this function is a no-op; the
-    missing dependency is reported in a centralised way via
-    :mod:`sfepy.base.deps` the first time it is actually required.
-    """
-    petsc4py = dep_manager.optional_import('petsc4py')
-    if petsc4py is None:
+    try:
+        import sys, petsc4py
+
+    except ImportError:
         return
 
-    import sys
     argv = [arg for arg in sys.argv if arg not in ['-h', '--help']]
     petsc4py.init(argv)
 
-
 init_petsc_args()
 
-# Import PETSc/MPI via the central registry so that a consistent
-# install hint is produced the first time they are required.
-PETSc = dep_manager.optional_import('petsc4py.PETSc')
-MPI = dep_manager.optional_import('mpi4py')
+try:
+    from petsc4py import PETSc
+
+except (ModuleNotFoundError, ImportError):
+    PETSc = None
+
+try:
+    from mpi4py import MPI
+
+except (ModuleNotFoundError, ImportError):
+    MPI = None
 
 from sfepy.base.base import assert_, output, ordered_iteritems, Struct
 from sfepy.base.timing import Timer
@@ -45,12 +43,12 @@ def partition_mesh(mesh, n_parts, use_metis=True, verbose=False):
     timer = Timer(start=True)
 
     if use_metis:
-        pymetis = dep_manager.optional_import('pymetis')
-        part_graph = getattr(pymetis, 'part_graph', None)
-        if part_graph is None:
+        try:
+            from pymetis import part_graph
+
+        except ImportError:
             output('pymetis is not available, using naive partitioning!')
-    else:
-        part_graph = None
+            part_graph = None
 
     if use_metis and (part_graph is not None):
         cmesh = mesh.cmesh

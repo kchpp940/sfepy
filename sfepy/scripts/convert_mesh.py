@@ -17,6 +17,11 @@ from sfepy.discrete.fem.utils import prepare_translate
 from sfepy.linalg import make_axis_rotation_matrix
 import sfepy.mesh.mesh_tools as mt
 from sfepy.mesh.mesh_generators import gen_tiled_mesh
+from sfepy.base.cli import (
+    helps as _common_helps,
+    add_mesh_format_arg,
+    check_input_file,
+)
 
 helps = {
     'scale' : 'scale factor (float or comma-separated list for each axis)'
@@ -29,7 +34,7 @@ helps = {
     'rot_angle' : """rotation angle in degrees around rotation axis
       [default: %(default)s]""",
     'refine' : 'uniform refinement level [default: %(default)s]',
-    'format' : 'output mesh format (overrides filename_out extension)',
+    'format' : _common_helps['format'],
     'list' : 'list supported readable/writable output mesh formats',
     'merge' : 'remove duplicate vertices',
     'tri-tetra' : 'convert elements: quad->tri, hexa->tetra',
@@ -155,9 +160,7 @@ def main():
     parser.add_argument('-r', '--refine', metavar='level',
                         action='store', type=int, dest='refine',
                         default=0, help=helps['refine'])
-    parser.add_argument('-f', '--format', metavar='format',
-                        action='store', type=str, dest='format',
-                        default=None, help=helps['format'])
+    add_mesh_format_arg(parser, help=helps['format'])
     parser.add_argument('-l', '--list', action='store_true',
                         dest='list', help=helps['list'])
     parser.add_argument('-m', '--merge', action='store_true',
@@ -215,6 +218,8 @@ def main():
     parser.add_argument('filename_in')
     parser.add_argument('filename_out')
     options = parser.parse_args()
+
+    check_input_file(options.filename_in)
 
     if options.list:
         output('Supported readable mesh formats:')
@@ -452,11 +457,7 @@ def main():
         mesh_out = mt.extract_edges(mesh, eps=options.eps)
         mesh_out = mt.merge_lines(mesh_out)
 
-        from sfepy.base.deps import dep_manager
-        meshio = dep_manager.require(
-            'meshio',
-            context='convert_mesh: meshio is required to extract edges',
-        )
+        import meshio
         emesh = meshio.Mesh(mesh_out[0], [('line', mesh_out[2][0])],
                             cell_data={'mat_id' : mesh_out[3]})
         emesh.write(filename_out)
@@ -467,10 +468,4 @@ def main():
         output('...done')
 
 if __name__ == '__main__':
-    from sfepy.base.deps import (DependencyMissingError,
-                                fatal_dependency_error)
-
-    try:
-        main()
-    except DependencyMissingError as exc:
-        fatal_dependency_error(exc)
+    main()

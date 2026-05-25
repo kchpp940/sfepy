@@ -51,15 +51,20 @@ from sfepy.base.conf import ProblemConf, get_standard_keywords
 from sfepy.discrete import Problem
 from sfepy.discrete.fem import MeshIO
 from sfepy.discrete.probes import write_results, read_results
+from sfepy.base.cli import (
+    helps as _common_helps,
+    add_debug_arg,
+    add_output_format_arg,
+    add_output_filename_arg,
+    add_version_arg,
+    apply_debug_option,
+    set_output_prefix,
+)
 
 helps = {
-    'debug':
-    'automatically start debugger when an exception is raised',
-    'filename' :
-    'basename of output file(s) [default: <basename of input file>]',
-    'output_format' :
-    'output figure file format (supported by the matplotlib backend used) '\
-    '[default: %(default)s]',
+    'debug': _common_helps['debug'],
+    'filename' : _common_helps['filename'],
+    'output_format' : _common_helps['output_format'],
     'auto_dir' :
     'the directory of the results file is determined automatically using the '\
     '"output_dir" option in input file options',
@@ -227,23 +232,17 @@ def postprocess(filename_input, filename_results, options):
 def main():
     parser = ArgumentParser(description=__doc__,
                             formatter_class=RawDescriptionHelpFormatter)
-    parser.add_argument('--version', action='version',
-                        version='%(prog)s ' + sfepy.__version__)
-    parser.add_argument('--debug',
-                        action='store_true', dest='debug',
-                        default=False, help=helps['debug'])
-    parser.add_argument('-o', metavar='filename',
-                        action='store', dest='output_filename_trunk',
-                        default=None, help=helps['filename'])
+    add_version_arg(parser)
+    add_debug_arg(parser)
+    add_output_filename_arg(parser, dest='output_filename_trunk',
+                            help=helps['filename'])
     parser.add_argument('--auto-dir',
                         action='store_true', dest='auto_dir',
                         default=False, help=helps['auto_dir'])
     parser.add_argument('--same-dir',
                         action='store_true', dest='same_dir',
                         default=False, help=helps['same_dir'])
-    parser.add_argument('-f', '--format', metavar='format',
-                        action='store', dest='output_format',
-                        default='png', help=helps['output_format'])
+    add_output_format_arg(parser, default='png', help=helps['output_format'])
     parser.add_argument('--only-names', metavar='list of names',
                         action='store', dest='only_names',
                         default=None, help=helps['only_names'])
@@ -263,8 +262,7 @@ def main():
     parser.add_argument('filename_out')
     options = parser.parse_args()
 
-    if options.debug:
-        from sfepy.base.base import debug_on_error; debug_on_error()
+    apply_debug_option(options)
 
     filename_input = options.filename_in
     filename_results = options.filename_out
@@ -272,7 +270,7 @@ def main():
     if options.only_names is not None:
         options.only_names = options.only_names.split(',')
 
-    output.prefix = 'probe:'
+    set_output_prefix('probe:')
 
     if options.postprocess:
         postprocess(filename_input, filename_results, options)
@@ -280,10 +278,4 @@ def main():
         generate_probes(filename_input, filename_results, options)
 
 if __name__ == '__main__':
-    from sfepy.base.deps import (DependencyMissingError,
-                                fatal_dependency_error)
-
-    try:
-        main()
-    except DependencyMissingError as exc:
-        fatal_dependency_error(exc)
+    main()

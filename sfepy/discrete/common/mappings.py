@@ -4,17 +4,7 @@ Reference-physical domain mappings.
 import numpy as nm
 
 from sfepy.base.base import Struct
-from sfepy.base.deps import dep_manager
-
-# Pull in the compiled C helper through the central registry so that a
-# missing extension produces a single, consistent install hint.
-try:
-    from sfepy.discrete.common.extmods.cmapping import CMapping  # noqa: F401
-except (ImportError, AttributeError) as exc:
-    dep_manager.require(
-        'c-ext-common',
-        context='sfepy.discrete.common.mappings import failed: %s' % exc,
-    )
+from sfepy.discrete.common.extmods.cmapping import CMapping
 
 
 class PyCMapping(Struct):
